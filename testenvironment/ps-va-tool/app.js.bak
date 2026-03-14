@@ -1,10 +1,6 @@
 // ============================================================
-// PS-VA DOCUMENT TOOL v6.0 - Complete Standalone Application
+// PS-VA DOCUMENT TOOL v4.5 - Complete Standalone Application
 // ============================================================
-
-// ===== VERSION & COMPATIBILITY =====
-const CURRENT_DATA_VERSION = 6;
-const MIN_SUPPORTED_VERSION = 1;
 
 // ===== GLOBAL STATE =====
 let currentPage = 'jobs';
@@ -13,151 +9,6 @@ let pdfDarkMode = true;
 let selectedThemeId = 'classic-dark';
 let editingDocId = null;
 let currentJobId = null; // for job-scoped views
-
-// ===== EMPLOYEE TYPES / CLASSIFICATIONS =====
-const DEFAULT_EMPLOYEE_TYPES = [
-  { id: 'senior_electrician', name: 'Senior Electrician', description: 'Licensed journeyman with 10+ years experience', defaultRate: 200, color: '#DC2626' },
-  { id: 'journeyman', name: 'Journeyman Electrician', description: 'Licensed journeyman electrician', defaultRate: 150, color: '#3B82F6' },
-  { id: 'junior_electrician', name: 'Junior Electrician', description: 'Apprentice or less experienced electrician', defaultRate: 125, color: '#22C55E' },
-  { id: 'helper', name: 'Helper / Laborer', description: 'General labor support', defaultRate: 75, color: '#F59E0B' },
-  { id: 'engineer', name: 'Engineer', description: 'Engineering and commissioning specialist', defaultRate: 300, color: '#8B5CF6' },
-  { id: 'supervisor', name: 'Supervisor / Foreman', description: 'On-site supervision and project management', defaultRate: 225, color: '#EC4899' },
-];
-
-function getEmployeeTypes() {
-  const data = localStorage.getItem('psva_employee_types');
-  return data ? JSON.parse(data) : DEFAULT_EMPLOYEE_TYPES.map(t => ({...t}));
-}
-
-function saveEmployeeTypes(types) {
-  localStorage.setItem('psva_employee_types', JSON.stringify(types));
-}
-
-function getEmployeeTypeById(id) {
-  return getEmployeeTypes().find(t => t.id === id) || null;
-}
-
-// ===== DOCUMENT CLASSIFICATION SYSTEM =====
-const DEFAULT_DOC_CLASSIFICATIONS = {
-  // For each document type, define which statuses are 'internal' vs 'external'
-  quote: {
-    statuses: [
-      { id: 'draft', label: 'Draft', classification: 'internal', color: '#6B7280' },
-      { id: 'review', label: 'In Review', classification: 'internal', color: '#F59E0B' },
-      { id: 'sent', label: 'Sent', classification: 'external', color: '#3B82F6' },
-      { id: 'accepted', label: 'Accepted', classification: 'external', color: '#22C55E' },
-      { id: 'rejected', label: 'Rejected', classification: 'external', color: '#EF4444' },
-      { id: 'expired', label: 'Expired', classification: 'internal', color: '#6B7280' },
-    ]
-  },
-  invoice: {
-    statuses: [
-      { id: 'draft', label: 'Draft', classification: 'internal', color: '#6B7280' },
-      { id: 'sent', label: 'Sent', classification: 'external', color: '#3B82F6' },
-      { id: 'paid', label: 'Paid', classification: 'external', color: '#22C55E' },
-      { id: 'overdue', label: 'Overdue', classification: 'external', color: '#EF4444' },
-      { id: 'void', label: 'Void', classification: 'internal', color: '#6B7280' },
-    ]
-  },
-  estimate: {
-    statuses: [
-      { id: 'draft', label: 'Draft', classification: 'internal', color: '#6B7280' },
-      { id: 'final', label: 'Final', classification: 'external', color: '#22C55E' },
-    ]
-  },
-  po: {
-    statuses: [
-      { id: 'draft', label: 'Draft', classification: 'internal', color: '#6B7280' },
-      { id: 'sent', label: 'Sent', classification: 'external', color: '#3B82F6' },
-      { id: 'received', label: 'Received', classification: 'external', color: '#22C55E' },
-    ]
-  },
-  workorder: {
-    statuses: [
-      { id: 'draft', label: 'Draft', classification: 'internal', color: '#6B7280' },
-      { id: 'assigned', label: 'Assigned', classification: 'internal', color: '#F59E0B' },
-      { id: 'in-progress', label: 'In Progress', classification: 'internal', color: '#3B82F6' },
-      { id: 'completed', label: 'Completed', classification: 'external', color: '#22C55E' },
-    ]
-  },
-  proposal: {
-    statuses: [
-      { id: 'draft', label: 'Draft', classification: 'internal', color: '#6B7280' },
-      { id: 'sent', label: 'Sent', classification: 'external', color: '#3B82F6' },
-      { id: 'accepted', label: 'Accepted', classification: 'external', color: '#22C55E' },
-      { id: 'rejected', label: 'Rejected', classification: 'external', color: '#EF4444' },
-    ]
-  },
-};
-
-function getDocClassifications() {
-  const data = localStorage.getItem('psva_doc_classifications');
-  return data ? JSON.parse(data) : JSON.parse(JSON.stringify(DEFAULT_DOC_CLASSIFICATIONS));
-}
-
-function saveDocClassifications(classifications) {
-  localStorage.setItem('psva_doc_classifications', JSON.stringify(classifications));
-}
-
-function getDocStatusInfo(docType, statusId) {
-  const cls = getDocClassifications();
-  const typeCls = cls[docType];
-  if (!typeCls) return { id: statusId || 'draft', label: statusId || 'Draft', classification: 'internal', color: '#6B7280' };
-  return typeCls.statuses.find(s => s.id === statusId) || typeCls.statuses[0];
-}
-
-function isDocInternal(docType, statusId) {
-  const info = getDocStatusInfo(docType, statusId);
-  return info.classification === 'internal';
-}
-
-// ===== INTERNAL DOCUMENT PASSWORD =====
-function getInternalDocPassword() {
-  return localStorage.getItem('psva_internal_doc_password') || 'internalonly';
-}
-
-function setInternalDocPassword(pwd) {
-  localStorage.setItem('psva_internal_doc_password', pwd);
-}
-
-// ===== SKILL DETAIL VISIBILITY (default: hide on customer docs) =====
-function getShowSkillDetail() {
-  const v = localStorage.getItem('psva_show_skill_detail');
-  return v === 'true';
-}
-
-function setShowSkillDetail(show) {
-  localStorage.setItem('psva_show_skill_detail', show ? 'true' : 'false');
-}
-
-// ===== DASHBOARD VIEW PREFERENCES =====
-// Stores per-page sort, filter, and view mode preferences
-function getDashboardPrefs(pageId) {
-  const data = localStorage.getItem('psva_dash_prefs_' + pageId);
-  return data ? JSON.parse(data) : { sortBy: 'date', sortDir: 'desc', filterStatus: 'all', filterJob: 'all', viewMode: 'list', searchQuery: '' };
-}
-
-function saveDashboardPrefs(pageId, prefs) {
-  localStorage.setItem('psva_dash_prefs_' + pageId, JSON.stringify(prefs));
-}
-
-// ===== QUOTE STATUSES =====
-const QUOTE_STATUSES = [
-  { id: 'draft', label: 'Draft', color: '#6B7280' },
-  { id: 'review', label: 'In Review', color: '#F59E0B' },
-  { id: 'sent', label: 'Sent', color: '#3B82F6' },
-  { id: 'accepted', label: 'Accepted', color: '#22C55E' },
-  { id: 'rejected', label: 'Rejected', color: '#EF4444' },
-  { id: 'expired', label: 'Expired', color: '#6B7280' },
-];
-
-const INVOICE_STATUSES = [
-  { id: 'draft', label: 'Draft', color: '#6B7280' },
-  { id: 'sent', label: 'Sent', color: '#3B82F6' },
-  { id: 'paid', label: 'Paid', color: '#22C55E' },
-  { id: 'overdue', label: 'Overdue', color: '#EF4444' },
-  { id: 'void', label: 'Void', color: '#6B7280' },
-];
 
 // ===== PDF THEMES =====
 const PDF_THEMES = [
@@ -443,7 +294,6 @@ function renderPage() {
     case '1099-tracking': render1099Tracking(); break;
     case 'quarterly-taxes': renderQuarterlyTaxes(); break;
     case 'tax-package': renderYearEndTaxPackage(); break;
-    case 'employee-hr': renderEmployeeHR(); break;
     default: renderJobsList();
   }
 }
@@ -477,35 +327,7 @@ function getDefaultJob() {
 
 function renderJobsList() {
   const main = document.querySelector('.main-content');
-  let jobs = getJobs();
-  const prefs = getDashboardPrefs('jobs');
-  const viewMode = prefs.viewMode || 'grid';
-
-  // Search filter
-  if (prefs.searchQuery) {
-    const q = prefs.searchQuery.toLowerCase();
-    jobs = jobs.filter(j => {
-      return (j.jobNumber || '').toLowerCase().includes(q) || (j.name || '').toLowerCase().includes(q) || (j.customer?.company || '').toLowerCase().includes(q) || (j.customer?.name || '').toLowerCase().includes(q);
-    });
-  }
-
-  // Status filter
-  if (prefs.filterStatus && prefs.filterStatus !== 'all') {
-    jobs = jobs.filter(j => j.status === prefs.filterStatus);
-  }
-
-  // Sort
-  const sortDir = prefs.sortDir === 'asc' ? 1 : -1;
-  jobs.sort((a, b) => {
-    switch (prefs.sortBy) {
-      case 'number': return (a.jobNumber || '').localeCompare(b.jobNumber || '') * sortDir;
-      case 'name': return (a.name || '').localeCompare(b.name || '') * sortDir;
-      case 'status': return (a.status || '').localeCompare(b.status || '') * sortDir;
-      case 'customer': return (a.customer?.company || a.customer?.name || '').localeCompare(b.customer?.company || b.customer?.name || '') * sortDir;
-      default: return (a.startDate || '').localeCompare(b.startDate || '') * sortDir;
-    }
-  });
-
+  const jobs = getJobs();
   main.innerHTML = `
     <div class="page-header">
       <h1>Jobs</h1>
@@ -513,52 +335,14 @@ function renderJobsList() {
         <button class="btn btn-primary" onclick="createNewJob()">+ New Job</button>
       </div>
     </div>
-    <div class="card" style="margin-bottom:12px;">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <input class="form-input" style="width:200px;" placeholder="Search jobs..." value="${escapeHtml(prefs.searchQuery || '')}" oninput="updateDocListPref('jobs','searchQuery',this.value); renderJobsList();">
-        <select class="form-select" style="width:160px;" onchange="updateDocListPref('jobs','filterStatus',this.value); renderJobsList();">
-          <option value="all">All Statuses</option>
-          ${JOB_STATUSES.map(s => '<option value="' + s.id + '"' + (prefs.filterStatus === s.id ? ' selected' : '') + '>' + s.label + '</option>').join('')}
-        </select>
-        <select class="form-select" style="width:140px;" onchange="updateDocListPref('jobs','sortBy',this.value); renderJobsList();">
-          <option value="date" ${prefs.sortBy==='date'?'selected':''}>Sort by Date</option>
-          <option value="number" ${prefs.sortBy==='number'?'selected':''}>Sort by Number</option>
-          <option value="name" ${prefs.sortBy==='name'?'selected':''}>Sort by Name</option>
-          <option value="status" ${prefs.sortBy==='status'?'selected':''}>Sort by Status</option>
-          <option value="customer" ${prefs.sortBy==='customer'?'selected':''}>Sort by Customer</option>
-        </select>
-        <button class="btn btn-secondary btn-sm" onclick="const p=getDashboardPrefs('jobs'); p.sortDir=p.sortDir==='asc'?'desc':'asc'; saveDashboardPrefs('jobs',p); renderJobsList();">${prefs.sortDir === 'asc' ? '\u25b2 Asc' : '\u25bc Desc'}</button>
-        <div style="margin-left:auto;display:flex;gap:4px;">
-          <button class="btn btn-secondary btn-sm ${viewMode==='grid'?'active':''}" onclick="updateDocListPref('jobs','viewMode','grid'); renderJobsList();" title="Grid View">\u25a6</button>
-          <button class="btn btn-secondary btn-sm ${viewMode==='list'?'active':''}" onclick="updateDocListPref('jobs','viewMode','list'); renderJobsList();" title="List View">\u2630</button>
-        </div>
-      </div>
-    </div>
-    ${jobs.length === 0 ? '<p class="intro-text">No jobs found.</p>' : ''}
-    ${viewMode === 'list' ? `
-      ${jobs.map(job => {
-        const estimates = getEstimates().filter(e => e.jobId === job.id);
-        const timesheets = getTimesheets().filter(t => t.jobId === job.id);
-        const totalEstimated = estimates.reduce((sum, e) => sum + (e.totalCustomerPrice || 0), 0);
-        return `
-        <div class="doc-row" onclick="openJobDashboard('${job.id}')">
-          <div class="doc-row-info">
-            <div class="doc-row-number">${escapeHtml(job.jobNumber)} ${getStatusBadge(job.status)}</div>
-            <div class="doc-row-meta">${escapeHtml(job.name || 'Untitled')} \u00b7 ${escapeHtml(job.customer?.company || job.customer?.name || '')} \u00b7 ${formatDateShort(job.startDate)}</div>
-          </div>
-          <div class="doc-row-actions">
-            <span class="doc-row-total">${totalEstimated > 0 ? formatCurrency(totalEstimated) : ''}</span>
-            <button class="btn-icon" onclick="event.stopPropagation(); confirmDeleteJob('${job.id}','${escapeHtml(job.name || job.jobNumber)}')" title="Delete">\ud83d\uddd1</button>
-          </div>
-        </div>`;
-      }).join('')}
-    ` : `
+    ${jobs.length === 0 ? '<p class="intro-text">No jobs yet. Create your first job to get started.</p>' : ''}
     <div class="jobs-grid">
       ${jobs.map(job => {
         const estimates = getEstimates().filter(e => e.jobId === job.id);
         const timesheets = getTimesheets().filter(t => t.jobId === job.id);
         const receipts = getReceipts().filter(r => r.jobId === job.id);
         const totalEstimated = estimates.reduce((sum, e) => sum + (e.totalCustomerPrice || 0), 0);
+        const totalLabor = timesheets.reduce((sum, t) => sum + (t.totalCost || 0), 0);
         return `
         <div class="job-card" onclick="openJobDashboard('${job.id}')">
           <div class="job-card-header">
@@ -568,23 +352,22 @@ function renderJobsList() {
             </div>
             ${getStatusBadge(job.status)}
           </div>
-          <div class="job-card-customer">${escapeHtml(job.customer?.company || job.customer?.name || 'No customer')}</div>
+          <div class="job-card-customer">${escapeHtml(job.customer.company || job.customer.name || 'No customer')}</div>
           <div class="job-card-meta">
             <span>${formatDateShort(job.startDate)}</span>
-            ${totalEstimated > 0 ? '<span>' + formatCurrency(totalEstimated) + '</span>' : ''}
+            ${totalEstimated > 0 ? `<span>${formatCurrency(totalEstimated)}</span>` : ''}
           </div>
           <div class="job-card-stats">
-            ${estimates.length > 0 ? '<span class="stat-pill">\ud83d\udccb ' + estimates.length + ' Est</span>' : ''}
-            ${timesheets.length > 0 ? '<span class="stat-pill">\u23f1 ' + timesheets.length + ' TS</span>' : ''}
-            ${receipts.length > 0 ? '<span class="stat-pill">\ud83e\uddfe ' + receipts.length + ' Rcpt</span>' : ''}
+            ${estimates.length > 0 ? `<span class="stat-pill">📋 ${estimates.length} Est</span>` : ''}
+            ${timesheets.length > 0 ? `<span class="stat-pill">⏱ ${timesheets.length} TS</span>` : ''}
+            ${receipts.length > 0 ? `<span class="stat-pill">🧾 ${receipts.length} Rcpt</span>` : ''}
           </div>
           <div class="job-card-delete">
-            <button class="btn-icon" onclick="event.stopPropagation(); confirmDeleteJob('${job.id}','${escapeHtml(job.name || job.jobNumber)}')" title="Delete Job">\ud83d\uddd1</button>
+            <button class="btn-icon" onclick="event.stopPropagation(); confirmDeleteJob('${job.id}','${escapeHtml(job.name || job.jobNumber)}')" title="Delete Job">🗑</button>
           </div>
         </div>`;
       }).join('')}
     </div>
-    `}
   `;
 }
 
@@ -719,7 +502,6 @@ function renderJobDashboard() {
       </div>
       <div class="page-header-actions">
         ${getStatusBadge(job.status)}
-        <button class="btn btn-secondary" onclick="exportJobPackagePDF('${job.id}')">\u2193 Job Package PDF</button>
         <button class="btn btn-secondary" onclick="editJobFromDashboard('${job.id}')">Edit Job</button>
         <button class="btn btn-danger" onclick="confirmDeleteJob('${job.id}','${escapeHtml(job.name || job.jobNumber)}')">Delete Job</button>
       </div>
@@ -1126,7 +908,6 @@ function editEstimate(estId) {
 
 function renderEstimateEditor(est) {
   window._currentEstimate = est;
-  if (!est.lineItems) est.lineItems = [];
   window._estLineItems = est.lineItems.map(li => ({...li}));
   const main = document.querySelector('.main-content');
   const job = est.jobId ? getJobById(est.jobId) : null;
@@ -1178,7 +959,6 @@ function renderEstimateEditor(est) {
         <button class="btn btn-secondary btn-sm" onclick="addEstLineItem()">+ Add Line Item</button>
         <button class="btn btn-secondary btn-sm" onclick="showEquipmentRoiPicker()">+ Add Equipment (ROI)</button>
         <button class="btn btn-secondary btn-sm" onclick="addEstLineItemFromRate()">+ Add from Rate Sheet</button>
-        <button class="btn btn-secondary btn-sm" onclick="addEstLineItemFromEmpType()">+ Add by Employee Type</button>
       </div>
     </div>
     <div class="totals-section">
@@ -1300,26 +1080,6 @@ function checkEstimateDateHoliday(dateStr) {
   }
 }
 
-function addEstLineItemFromEmpType() {
-  const empTypes = getEmployeeTypes();
-  if (empTypes.length === 0) { showToast('No employee types defined. Add them in Settings.', 'error'); return; }
-  const options = empTypes.map((t, i) => (i + 1) + '. ' + t.name + ' ($' + t.defaultRate.toFixed(2) + '/hr)').join('\n');
-  const choice = prompt('Select an employee type to add as labor:\n\n' + options + '\n\nEnter number:');
-  if (!choice) return;
-  const idx = parseInt(choice) - 1;
-  if (idx >= 0 && idx < empTypes.length) {
-    const t = empTypes[idx];
-    window._estLineItems.push({
-      id: generateId(), category: 'labor',
-      description: t.name + ' (' + (t.description || 'Labor') + ')',
-      quantity: 4, unit: 'Hours', unitCost: t.defaultRate, markupPercent: 0,
-    });
-    renderEstLineItems();
-    recalcEstimate();
-    showToast(t.name + ' added at $' + t.defaultRate.toFixed(2) + '/hr', 'success');
-  }
-}
-
 function addEstLineItem() {
   window._estLineItems.push({ id: generateId(), category: 'materials', description: '', quantity: 1, unit: 'Each', unitCost: 0, markupPercent: 25 });
   renderEstLineItems();
@@ -1417,95 +1177,17 @@ function generateQuoteFromEstimate() {
 function renderDocumentList(type) {
   const main = document.querySelector('.main-content');
   const titles = { quote: 'Quotes', invoice: 'Invoices', po: 'Purchase Orders', letterhead: 'Letterhead', estimate: 'Estimates', workorder: 'Work Orders', changeorder: 'Change Orders', proposal: 'Proposals', contracts: 'Contracts', creditmemo: 'Credit Memos', paymentreceipt: 'Payment Receipts', statements: 'Statements', certificates: 'Certificates', assettransfers: 'Asset Transfers', safetyreports: 'Safety Reports' };
-  let docs = type === 'estimate' ? getEstimates() : getDocuments(type);
-  const prefs = getDashboardPrefs(type);
-  const jobs = getJobs();
-
-  // Determine available statuses for this doc type
-  const hasStatuses = ['quote', 'invoice', 'estimate', 'po', 'workorder', 'proposal'].includes(type);
-  let statusList = [];
-  if (type === 'quote') statusList = QUOTE_STATUSES;
-  else if (type === 'invoice') statusList = INVOICE_STATUSES;
-  else {
-    const cls = getDocClassifications();
-    if (cls[type]) statusList = cls[type].statuses;
-  }
-
-  // Search filter
-  if (prefs.searchQuery) {
-    const q = prefs.searchQuery.toLowerCase();
-    docs = docs.filter(d => {
-      const num = (d.docNumber || d.estimateNumber || '').toLowerCase();
-      const name = (d.customerName || d.vendorName || d.recipientName || '').toLowerCase();
-      return num.includes(q) || name.includes(q);
-    });
-  }
-
-  // Status filter
-  if (prefs.filterStatus && prefs.filterStatus !== 'all' && hasStatuses) {
-    docs = docs.filter(d => (d.status || 'draft') === prefs.filterStatus);
-  }
-
-  // Job filter
-  if (prefs.filterJob && prefs.filterJob !== 'all') {
-    docs = docs.filter(d => d.jobId === prefs.filterJob);
-  }
-
-  // Sort
-  const sortDir = prefs.sortDir === 'asc' ? 1 : -1;
-  docs.sort((a, b) => {
-    let va, vb;
-    switch (prefs.sortBy) {
-      case 'number': va = a.docNumber || a.estimateNumber || ''; vb = b.docNumber || b.estimateNumber || ''; return va.localeCompare(vb) * sortDir;
-      case 'name': va = a.customerName || a.vendorName || ''; vb = b.customerName || b.vendorName || ''; return va.localeCompare(vb) * sortDir;
-      case 'total': va = a.total || a.totalCustomerPrice || 0; vb = b.total || b.totalCustomerPrice || 0; return (va - vb) * sortDir;
-      case 'status': va = a.status || 'draft'; vb = b.status || 'draft'; return va.localeCompare(vb) * sortDir;
-      default: va = a.date || ''; vb = b.date || ''; return va.localeCompare(vb) * sortDir;
-    }
-  });
-
-  // Build status badge HTML helper
-  function statusBadge(doc) {
-    if (!hasStatuses) return '';
-    const st = doc.status || 'draft';
-    const info = statusList.find(s => s.id === st) || { label: st, color: '#6B7280' };
-    return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:' + info.color + '20;color:' + info.color + ';">' + escapeHtml(info.label) + '</span>';
-  }
-
-  // Unique jobs used in docs for filter dropdown
-  const usedJobIds = [...new Set((type === 'estimate' ? getEstimates() : getDocuments(type)).map(d => d.jobId).filter(Boolean))];
+  const docs = type === 'estimate' ? getEstimates() : getDocuments(type);
 
   main.innerHTML = `
     <div class="page-header">
       <h1>${titles[type]}</h1>
       <div class="page-header-actions">
-        ${type !== 'estimate' ? `<button class="btn btn-secondary" onclick="exportDashboardTemplate('${type}')" title="Download a blank JSON template for importing ${titles[type]}">\u2193 Template</button>` : ''}
-        ${type !== 'estimate' ? `<button class="btn btn-secondary" onclick="importDocuments('${type}')" title="Import ${titles[type]} from JSON files (single or batch)">\u2191 Import</button>` : ''}
+        ${type !== 'estimate' ? `<button class="btn btn-secondary" onclick="importDocuments('${type}')">↓ Import</button>` : ''}
         <button class="btn btn-primary" onclick="createNewDocument('${type}')">+ New ${titles[type].replace(/s$/, '')}</button>
       </div>
     </div>
-    <div class="card" style="margin-bottom:12px;">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <input class="form-input" style="width:200px;" placeholder="Search..." value="${escapeHtml(prefs.searchQuery || '')}" oninput="updateDocListPref('${type}','searchQuery',this.value)">
-        ${hasStatuses ? `<select class="form-select" style="width:140px;" onchange="updateDocListPref('${type}','filterStatus',this.value)">
-          <option value="all">All Statuses</option>
-          ${statusList.map(s => '<option value="' + s.id + '"' + (prefs.filterStatus === s.id ? ' selected' : '') + '>' + s.label + '</option>').join('')}
-        </select>` : ''}
-        ${usedJobIds.length > 0 ? `<select class="form-select" style="width:180px;" onchange="updateDocListPref('${type}','filterJob',this.value)">
-          <option value="all">All Jobs</option>
-          ${usedJobIds.map(jid => { const j = getJobById(jid); return j ? '<option value="' + jid + '"' + (prefs.filterJob === jid ? ' selected' : '') + '>' + escapeHtml(j.jobNumber) + '</option>' : ''; }).join('')}
-        </select>` : ''}
-        <select class="form-select" style="width:140px;" onchange="updateDocListPref('${type}','sortBy',this.value)">
-          <option value="date" ${prefs.sortBy==='date'?'selected':''}>Sort by Date</option>
-          <option value="number" ${prefs.sortBy==='number'?'selected':''}>Sort by Number</option>
-          <option value="name" ${prefs.sortBy==='name'?'selected':''}>Sort by Name</option>
-          <option value="total" ${prefs.sortBy==='total'?'selected':''}>Sort by Total</option>
-          ${hasStatuses ? '<option value="status"' + (prefs.sortBy==='status'?' selected':'') + '>Sort by Status</option>' : ''}
-        </select>
-        <button class="btn btn-secondary btn-sm" onclick="toggleDocListSortDir('${type}')" title="Toggle sort direction">${prefs.sortDir === 'asc' ? '\u25b2 Asc' : '\u25bc Desc'}</button>
-      </div>
-    </div>
-    ${docs.length === 0 ? `<p class="intro-text">No ${titles[type].toLowerCase()} found.</p>` : ''}
+    ${docs.length === 0 ? `<p class="intro-text">No ${titles[type].toLowerCase()} yet.</p>` : ''}
     ${docs.map(doc => {
       const num = doc.docNumber || doc.estimateNumber || '';
       const name = doc.customerName || doc.vendorName || doc.recipientName || '';
@@ -1515,35 +1197,17 @@ function renderDocumentList(type) {
       return `
       <div class="doc-row" onclick="${type === 'estimate' ? `editEstimate('${doc.id}')` : `editDocument('${type}','${doc.id}')`}">
         <div class="doc-row-info">
-          <div class="doc-row-number">${escapeHtml(num)} ${statusBadge(doc)}</div>
-          <div class="doc-row-meta">${escapeHtml(name)} \u00b7 ${formatDate(date)}${jobLabel ? ` \u00b7 ${escapeHtml(jobLabel)}` : ''}</div>
+          <div class="doc-row-number">${escapeHtml(num)}</div>
+          <div class="doc-row-meta">${escapeHtml(name)} · ${formatDate(date)}${jobLabel ? ` · ${escapeHtml(jobLabel)}` : ''}</div>
         </div>
         <div class="doc-row-actions">
           <span class="doc-row-total">${formatCurrency(total)}</span>
-          ${type !== 'estimate' ? `<button class="btn-icon" onclick="event.stopPropagation(); exportSingleDoc('${type}','${doc.id}')" title="Export JSON">\u2197</button>` : ''}
-          <button class="btn-icon" onclick="event.stopPropagation(); confirmDelete('${type === 'estimate' ? 'estimates' : type}','${doc.id}','${escapeHtml(num)}')" title="Delete">\ud83d\uddd1</button>
+          ${type !== 'estimate' ? `<button class="btn-icon" onclick="event.stopPropagation(); exportSingleDoc('${type}','${doc.id}')" title="Export JSON">↗</button>` : ''}
+          <button class="btn-icon" onclick="event.stopPropagation(); confirmDelete('${type === 'estimate' ? 'estimates' : type}','${doc.id}','${escapeHtml(num)}')" title="Delete">🗑</button>
         </div>
       </div>`;
     }).join('')}
   `;
-}
-
-function updateDocListPref(type, key, value) {
-  const prefs = getDashboardPrefs(type);
-  prefs[key] = value;
-  saveDashboardPrefs(type, prefs);
-  if (type === 'jobs') { renderJobsList(); }
-  else if (type === 'timesheets') { renderTimesheetsList(); }
-  else { renderDocumentList(type); }
-}
-
-function toggleDocListSortDir(type) {
-  const prefs = getDashboardPrefs(type);
-  prefs.sortDir = prefs.sortDir === 'asc' ? 'desc' : 'asc';
-  saveDashboardPrefs(type, prefs);
-  if (type === 'jobs') { renderJobsList(); }
-  else if (type === 'timesheets') { renderTimesheetsList(); }
-  else { renderDocumentList(type); }
 }
 
 function createNewDocument(type) {
@@ -1693,286 +1357,20 @@ function exportSingleDoc(type, id) {
 
 function importDocuments(type) {
   const input = document.createElement('input');
-  input.type = 'file'; input.accept = '.json'; input.multiple = true;
+  input.type = 'file'; input.accept = '.json';
   input.onchange = (e) => {
-    const files = Array.from(e.target.files);
-    if (files.length === 0) return;
-    let allDocs = [];
-    let totalErrors = 0;
-    let filesProcessed = 0;
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          let data;
-          try {
-            data = JSON.parse(ev.target.result);
-          } catch(parseErr) {
-            totalErrors++;
-            filesProcessed++;
-            if (filesProcessed === files.length) processAllDocs();
-            return;
-          }
-          // Remove template markers if present
-          if (data._isTemplate) { delete data._isTemplate; delete data._instructions; }
-          // Support single doc, array of docs, or wrapped {documents: [...]}
-          let docs = Array.isArray(data) ? data : (data.id ? [data] : (data.documents ? data.documents : []));
-          // Also support full backup files — extract the relevant type
-          if (docs.length === 0 && data.version) {
-            const typeKeyMap = { quote: 'quotes', invoice: 'invoices', po: 'po', letterhead: 'letterheads', workorder: 'workorders', changeorder: 'changeorders', proposal: 'proposals', contracts: 'contracts', creditmemo: 'creditmemos', paymentreceipt: 'paymentreceipts', statements: 'statements', certificates: 'certificates', assettransfers: 'assettransfers', safetyreports: 'safetyreports' };
-            const key = typeKeyMap[type];
-            if (key && data[key] && Array.isArray(data[key])) {
-              docs = data[key];
-            }
-          }
-          allDocs = allDocs.concat(docs);
-          if (docs.length === 0) {
-            totalErrors++;
-            console.warn('[PS-VA Import] No valid documents found in file:', file.name);
-          }
-        } catch(err) {
-          totalErrors++;
-          console.error('[PS-VA Import] Error processing file:', file.name, err);
-        }
-        filesProcessed++;
-        if (filesProcessed === files.length) processAllDocs();
-      };
-      reader.readAsText(file);
-    });
-
-    function processAllDocs() {
-      if (allDocs.length === 0) {
-        showToast('No valid documents found in the selected file(s).' + (totalErrors > 0 ? ' ' + totalErrors + ' file(s) had errors.' : ''), 'error');
-        return;
-      }
-
-      // Validate all docs and check for issues
-      const docsWithIssues = [];
-      const cleanDocs = [];
-      allDocs.forEach(doc => {
-        const result = validateDocument({...doc}, type);
-        if (!result.valid) {
-          docsWithIssues.push({ doc: doc, issues: result.issues, include: false });
-          return;
-        }
-        const editableIssues = result.issues.filter(i => i.severity === 'warning' || i.severity === 'error');
-        if (editableIssues.length > 0) {
-          docsWithIssues.push({ doc: result.doc, issues: result.issues, include: true });
-        } else {
-          cleanDocs.push(result.doc);
-        }
-      });
-
-      // If there are issues, show a review modal for just these documents
-      if (docsWithIssues.length > 0) {
-        showDocImportReviewModal(type, cleanDocs, docsWithIssues, totalErrors);
-      } else {
-        // All clean — import directly
-        cleanDocs.forEach(doc => {
-          if (doc.id === 'TEMPLATE' || !doc.id) {
-            doc.id = type + '-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
-          }
-          saveDocument(type, doc);
-        });
-        renderPage();
-        showToast(cleanDocs.length + ' document(s) imported successfully.', 'success');
-      }
-    }
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const doc = JSON.parse(ev.target.result);
+        if (doc.id) { saveDocument(type, doc); renderPage(); showToast('Imported!'); }
+      } catch(err) { showToast('Import failed: ' + err.message, 'error'); }
+    };
+    reader.readAsText(file);
   };
   input.click();
-}
-
-// Simplified review modal for per-dashboard document imports
-function showDocImportReviewModal(type, cleanDocs, docsWithIssues, totalErrors) {
-  const typeLabels = { quote: 'Quote', invoice: 'Invoice', po: 'Purchase Order', letterhead: 'Letterhead', workorder: 'Work Order', changeorder: 'Change Order', proposal: 'Proposal', contracts: 'Contract', creditmemo: 'Credit Memo', paymentreceipt: 'Payment Receipt', statements: 'Statement', certificates: 'Certificate', assettransfers: 'Asset Transfer', safetyreports: 'Safety Report', estimate: 'Estimate', timesheets: 'Timesheet' };
-  const typeLabel = typeLabels[type] || type;
-
-  const overlay = document.createElement('div');
-  overlay.id = 'doc-import-review-overlay';
-  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
-
-  const modal = document.createElement('div');
-  modal.style.cssText = 'background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#e0e0e0);border-radius:12px;max-width:800px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);border:1px solid var(--border-color,#333);';
-
-  // Header
-  const header = document.createElement('div');
-  header.style.cssText = 'padding:20px 24px;border-bottom:1px solid var(--border-color,#333);flex-shrink:0;';
-  header.innerHTML = `
-    <h2 style="margin:0 0 8px 0;font-size:20px;">${typeLabel} Import Review</h2>
-    <div style="font-size:13px;color:var(--text-secondary,#888);">
-      <strong>${cleanDocs.length}</strong> clean record(s) ready \u00b7 <strong style="color:#f59e0b;">${docsWithIssues.length}</strong> record(s) need review
-      ${totalErrors > 0 ? ' \u00b7 <strong style="color:#ef4444;">' + totalErrors + '</strong> file error(s)' : ''}
-    </div>
-    <div style="font-size:12px;color:var(--text-secondary,#888);margin-top:6px;">Review the flagged fields below. Correct values, skip records, or cancel the entire import.</div>
-  `;
-  modal.appendChild(header);
-
-  // Body
-  const body = document.createElement('div');
-  body.style.cssText = 'flex:1;overflow-y:auto;padding:16px 24px;';
-
-  docsWithIssues.forEach((record, rIdx) => {
-    const card = document.createElement('div');
-    card.style.cssText = 'padding:12px 16px;border:1px solid var(--border-color,#333);border-radius:8px;margin-bottom:8px;' + (!record.include ? 'opacity:0.4;' : '');
-    card.setAttribute('data-ridx', rIdx);
-
-    const docLabel = record.doc.docNumber || record.doc.estimateNumber || record.doc.employeeName || record.doc.name || record.doc.id?.substring(0, 12) || 'Record';
-    const editableIssues = record.issues.filter(i => i.severity !== 'info');
-    const infoIssues = record.issues.filter(i => i.severity === 'info');
-
-    let html = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${editableIssues.length > 0 ? '8' : '0'}px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-weight:500;">${escapeHtml(docLabel)}</span>
-          ${record.doc.date ? '<span style="font-size:12px;color:var(--text-secondary,#888);">' + record.doc.date + '</span>' : ''}
-        </div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
-          <input type="checkbox" ${record.include ? 'checked' : ''} onchange="window._docImportToggle(${rIdx}, this.checked)" style="cursor:pointer;">
-          Include
-        </label>
-      </div>
-    `;
-
-    if (editableIssues.length > 0) {
-      html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
-      html += '<tr style="color:var(--text-secondary,#888);"><td style="padding:2px 8px;width:25%;">Field</td><td style="padding:2px 8px;width:40%;">Issue</td><td style="padding:2px 8px;width:35%;">Value</td></tr>';
-      editableIssues.forEach((issue, iIdx) => {
-        const sevColor = issue.severity === 'error' ? '#ef4444' : '#f59e0b';
-        let inputHtml = '';
-        if (issue.editable) {
-          const inputId = 'dir-' + rIdx + '-' + iIdx;
-          if (issue.inputType === 'select' && issue.options) {
-            inputHtml = '<select id="' + inputId + '" style="background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#e0e0e0);border:1px solid var(--border-color,#333);border-radius:4px;padding:2px 6px;font-size:12px;width:100%;">';
-            inputHtml += '<option value="">(select)</option>';
-            issue.options.forEach(opt => { inputHtml += '<option value="' + escapeHtml(opt) + '"' + (issue.defaultValue === opt ? ' selected' : '') + '>' + escapeHtml(opt) + '</option>'; });
-            inputHtml += '</select>';
-          } else if (issue.inputType === 'number') {
-            inputHtml = '<input type="number" id="' + inputId + '" value="' + (issue.defaultValue || '0') + '" step="0.01" style="background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#e0e0e0);border:1px solid var(--border-color,#333);border-radius:4px;padding:2px 6px;font-size:12px;width:100%;">';
-          } else if (issue.inputType === 'date') {
-            inputHtml = '<input type="date" id="' + inputId + '" value="' + (issue.defaultValue || '') + '" style="background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#e0e0e0);border:1px solid var(--border-color,#333);border-radius:4px;padding:2px 6px;font-size:12px;width:100%;">';
-          } else {
-            inputHtml = '<input type="text" id="' + inputId + '" value="' + escapeHtml(issue.defaultValue || '') + '" placeholder="Enter value" style="background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#e0e0e0);border:1px solid var(--border-color,#333);border-radius:4px;padding:2px 6px;font-size:12px;width:100%;">';
-          }
-        } else {
-          inputHtml = '<span style="font-size:11px;color:var(--text-secondary,#888);">' + escapeHtml(String(issue.defaultValue || 'auto')) + '</span>';
-        }
-        html += '<tr><td style="padding:4px 8px;border-top:1px solid var(--border-color,#222);">' + escapeHtml(issue.field) + '</td><td style="padding:4px 8px;border-top:1px solid var(--border-color,#222);color:' + sevColor + ';">' + escapeHtml(issue.message) + '</td><td style="padding:4px 8px;border-top:1px solid var(--border-color,#222);">' + inputHtml + '</td></tr>';
-      });
-      html += '</table>';
-    }
-    if (infoIssues.length > 0) {
-      html += '<div style="font-size:11px;color:var(--text-secondary,#666);margin-top:4px;">\u2139 ' + infoIssues.map(i => escapeHtml(i.message)).join(' \u00b7 ') + '</div>';
-    }
-
-    card.innerHTML = html;
-    body.appendChild(card);
-  });
-
-  modal.appendChild(body);
-
-  // Footer
-  const footer = document.createElement('div');
-  footer.style.cssText = 'padding:16px 24px;border-top:1px solid var(--border-color,#333);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;flex-wrap:wrap;gap:8px;';
-  footer.innerHTML = `
-    <button id="dir-cancel" class="btn btn-secondary" style="min-width:140px;">Cancel Import</button>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button id="dir-accept" class="btn btn-secondary" style="min-width:160px;">Accept All Defaults</button>
-      <button id="dir-proceed" class="btn btn-primary" style="min-width:180px;">Proceed with Corrections</button>
-    </div>
-  `;
-  modal.appendChild(footer);
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
-
-  // Toggle handler
-  window._docImportToggle = (rIdx, checked) => {
-    docsWithIssues[rIdx].include = checked;
-    const card = body.querySelector('[data-ridx="' + rIdx + '"]');
-    if (card) card.style.opacity = checked ? '1' : '0.4';
-  };
-
-  // Collect corrections
-  function collectDocCorrections() {
-    docsWithIssues.forEach((record, rIdx) => {
-      if (!record.include) return;
-      const editableIssues = record.issues.filter(i => i.severity !== 'info' && i.editable);
-      editableIssues.forEach((issue, iIdx) => {
-        const el = document.getElementById('dir-' + rIdx + '-' + iIdx);
-        if (!el) return;
-        const val = el.value;
-        if (val === '' || val === issue.defaultValue) return;
-        applyFieldCorrection(record.doc, issue.field, val, type);
-      });
-    });
-  }
-
-  function finishImport(applyCorrections) {
-    if (applyCorrections) collectDocCorrections();
-    overlay.remove();
-    delete window._docImportToggle;
-
-    let imported = 0;
-    let skipped = 0;
-
-    // Import clean docs
-    cleanDocs.forEach(doc => {
-      if (doc.id === 'TEMPLATE' || !doc.id) doc.id = type + '-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
-      saveDocument(type, doc);
-      imported++;
-    });
-
-    // Import reviewed docs (only included ones)
-    docsWithIssues.forEach(record => {
-      if (!record.include) { skipped++; return; }
-      const doc = record.doc;
-      if (doc.id === 'TEMPLATE' || !doc.id) doc.id = type + '-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
-      saveDocument(type, doc);
-      imported++;
-    });
-
-    renderPage();
-    let msg = imported + ' ' + typeLabel.toLowerCase() + '(s) imported.';
-    if (skipped > 0) msg += ' ' + skipped + ' skipped.';
-    showToast(msg, skipped > 0 ? 'warning' : 'success');
-  }
-
-  document.getElementById('dir-cancel').onclick = () => {
-    overlay.remove();
-    delete window._docImportToggle;
-    showToast('Import cancelled.', 'info');
-  };
-  document.getElementById('dir-accept').onclick = () => finishImport(false);
-  document.getElementById('dir-proceed').onclick = () => finishImport(true);
-}
-
-function exportDashboardTemplate(type) {
-  const titles = { quote: 'Quote', invoice: 'Invoice', po: 'Purchase Order', letterhead: 'Letterhead', estimate: 'Estimate', workorder: 'Work Order', changeorder: 'Change Order', proposal: 'Proposal', contracts: 'Contract', creditmemo: 'Credit Memo', paymentreceipt: 'Payment Receipt', statements: 'Statement', certificates: 'Certificate', assettransfers: 'Asset Transfer', safetyreports: 'Safety Report' };
-  let template;
-  switch(type) {
-    case 'quote': template = getDefaultQuote(); break;
-    case 'invoice': template = getDefaultInvoice(); break;
-    case 'po': template = getDefaultPO(); break;
-    case 'letterhead': template = getDefaultLetterhead(); break;
-    case 'workorder': template = getDefaultWorkOrder(); break;
-    case 'changeorder': template = getDefaultChangeOrder(); break;
-    case 'proposal': template = getDefaultProposal(); break;
-    case 'contracts': template = getDefaultContract(); break;
-    case 'creditmemo': template = getDefaultCreditMemo(); break;
-    case 'paymentreceipt': template = getDefaultPaymentReceipt(); break;
-    case 'statements': template = getDefaultStatement(); break;
-    case 'certificates': template = getDefaultCertificate(); break;
-    case 'assettransfers': template = getDefaultAssetTransfer(); break;
-    case 'safetyreports': template = getDefaultSafetyReport(); break;
-    default: template = { id: 'TEMPLATE', docNumber: 'TEMPLATE-001', date: todayStr() };
-  }
-  template._isTemplate = true;
-  template._instructions = 'Fill in the fields and remove this _instructions and _isTemplate field before importing. The id field will be auto-generated if set to TEMPLATE.';
-  const blob = new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `${type}-template.json`; a.click();
-  URL.revokeObjectURL(url);
-  showToast((titles[type] || type) + ' template exported!');
 }
 
 // ============================================================
@@ -1982,7 +1380,6 @@ function getDefaultQuote() {
   const company = getCompany();
   return {
     id: generateId(), docNumber: generateNumber('Q'), date: todayStr(), validUntil: '',
-    status: 'draft',
     jobId: '', projectName: '',
     customerName: '', customerCompany: '', customerPhone: '', customerEmail: '', customerAddress: '',
     introText: 'Thank you for allowing Power Services of Virginia LLC to provide pricing for the specified work.',
@@ -2025,11 +1422,6 @@ function renderQuoteEditor(quote) {
         <div class="form-group"><label class="form-label">Quote Number</label><input class="form-input" id="q-docNumber" value="${escapeHtml(quote.docNumber)}"></div>
         <div class="form-group"><label class="form-label">Date</label><input class="form-input" type="date" id="q-date" value="${quote.date}"></div>
         <div class="form-group"><label class="form-label">Valid Until</label><input class="form-input" type="date" id="q-validUntil" value="${quote.validUntil}"></div>
-        <div class="form-group"><label class="form-label">Status</label>
-          <select class="form-select" id="q-status">
-            ${QUOTE_STATUSES.map(s => '<option value="' + s.id + '"' + (quote.status === s.id ? ' selected' : '') + '>' + s.label + '</option>').join('')}
-          </select>
-        </div>
         <div class="form-group"><label class="form-label">Job</label>${buildJobSelector('q-job', quote.jobId, true)}</div>
         <div class="form-group"><label class="form-label">Project Name</label><input class="form-input" id="q-projectName" value="${escapeHtml(quote.projectName)}"></div>
       </div>
@@ -2153,7 +1545,6 @@ function collectQuoteData() {
   q.docNumber = document.getElementById('q-docNumber').value;
   q.date = document.getElementById('q-date').value;
   q.validUntil = document.getElementById('q-validUntil').value;
-  q.status = document.getElementById('q-status')?.value || 'draft';
   q.projectName = document.getElementById('q-projectName').value;
   // Resolve job selector (may auto-create a job)
   q.jobId = resolveJobId('q-job', 'Quote', q);
@@ -2203,7 +1594,6 @@ function getDefaultInvoice() {
   const company = getCompany();
   return {
     id: generateId(), docNumber: generateNumber('INV'), date: todayStr(),
-    status: 'draft',
     jobId: '', projectName: '', quoteRef: '', netTerms: 'Net 30', dueDate: '',
     customerName: '', customerCompany: '', customerPhone: '', customerEmail: '', customerAddress: '',
     lineItems: [{ item: 1, description: '', quantity: 1, unit: 'Labor', unitPrice: 0, taxable: false }],
@@ -2235,11 +1625,6 @@ function renderInvoiceEditor(inv) {
       <div class="form-grid">
         <div class="form-group"><label class="form-label">Invoice Number</label><input class="form-input" id="i-docNumber" value="${escapeHtml(inv.docNumber)}"></div>
         <div class="form-group"><label class="form-label">Date</label><input class="form-input" type="date" id="i-date" value="${inv.date}"></div>
-        <div class="form-group"><label class="form-label">Status</label>
-          <select class="form-select" id="i-status">
-            ${INVOICE_STATUSES.map(s => '<option value="' + s.id + '"' + (inv.status === s.id ? ' selected' : '') + '>' + s.label + '</option>').join('')}
-          </select>
-        </div>
         <div class="form-group"><label class="form-label">Job</label>${buildJobSelector('i-job', inv.jobId, true)}</div>
         <div class="form-group"><label class="form-label">Payment Terms</label>
           <select class="form-select" id="i-netTerms">
@@ -2330,7 +1715,6 @@ function collectInvoiceData() {
   const inv=window._currentInvoice;
   inv.docNumber=document.getElementById('i-docNumber').value;
   inv.date=document.getElementById('i-date').value;
-  inv.status=document.getElementById('i-status')?.value || 'draft';
   inv.netTerms=document.getElementById('i-netTerms').value;
   inv.dueDate=document.getElementById('i-dueDate').value;
   inv.quoteRef=document.getElementById('i-quoteRef').value;
@@ -2533,7 +1917,7 @@ function getDefaultTimesheet(jobId) {
   const company = getCompany();
   return {
     id: generateId(), jobId: jobId || '', date: todayStr(),
-    employeeName: '', employeeType: '', description: '',
+    employeeName: '', description: '',
     hoursRegular: 0, hoursOvertime: 0, hoursTravel: 0,
     rateRegular: company.regularRate, rateOvertime: company.overtimeRate, rateTravel: company.travelRate,
     totalCost: 0, notes: '',
@@ -2542,87 +1926,29 @@ function getDefaultTimesheet(jobId) {
 
 function renderTimesheetsList() {
   const main = document.querySelector('.main-content');
-  let entries = getTimesheets();
+  const entries = getTimesheets();
   const jobs = getJobs();
-  const prefs = getDashboardPrefs('timesheets');
-  const empTypes = getEmployeeTypes();
-
-  // Search filter
-  if (prefs.searchQuery) {
-    const q = prefs.searchQuery.toLowerCase();
-    entries = entries.filter(t => {
-      return (t.employeeName || '').toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q);
-    });
-  }
-
-  // Employee type filter
-  if (prefs.filterStatus && prefs.filterStatus !== 'all') {
-    entries = entries.filter(t => t.employeeType === prefs.filterStatus);
-  }
-
-  // Job filter
-  if (prefs.filterJob && prefs.filterJob !== 'all') {
-    entries = entries.filter(t => t.jobId === prefs.filterJob);
-  }
-
-  // Sort
-  const sortDir = prefs.sortDir === 'asc' ? 1 : -1;
-  entries.sort((a, b) => {
-    switch (prefs.sortBy) {
-      case 'name': return (a.employeeName || '').localeCompare(b.employeeName || '') * sortDir;
-      case 'total': return ((a.totalCost || 0) - (b.totalCost || 0)) * sortDir;
-      case 'hours': return (((a.hoursRegular||0)+(a.hoursOvertime||0)+(a.hoursTravel||0)) - ((b.hoursRegular||0)+(b.hoursOvertime||0)+(b.hoursTravel||0))) * sortDir;
-      default: return (a.date || '').localeCompare(b.date || '') * sortDir;
-    }
-  });
-  if (prefs.sortDir !== 'asc') entries.reverse();
-
-  const usedJobIds = [...new Set(getTimesheets().map(t => t.jobId).filter(Boolean))];
-
   main.innerHTML = `
     <div class="page-header">
       <h1>Timesheets</h1>
       <div class="page-header-actions">
         <button class="btn btn-secondary" onclick="exportTimesheetPDF()">Print Blank Timesheet</button>
-        <button class="btn btn-secondary" onclick="showBulkTimesheetEntry()">Bulk Entry</button>
         <button class="btn btn-primary" onclick="createNewTimesheet()">+ New Entry</button>
       </div>
     </div>
-    <div class="card" style="margin-bottom:12px;">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <input class="form-input" style="width:200px;" placeholder="Search..." value="${escapeHtml(prefs.searchQuery || '')}" oninput="updateDocListPref('timesheets','searchQuery',this.value); renderTimesheetsList();">
-        <select class="form-select" style="width:160px;" onchange="updateDocListPref('timesheets','filterStatus',this.value); renderTimesheetsList();">
-          <option value="all">All Employee Types</option>
-          ${empTypes.map(t => '<option value="' + t.id + '"' + (prefs.filterStatus === t.id ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>').join('')}
-        </select>
-        ${usedJobIds.length > 0 ? `<select class="form-select" style="width:180px;" onchange="updateDocListPref('timesheets','filterJob',this.value); renderTimesheetsList();">
-          <option value="all">All Jobs</option>
-          ${usedJobIds.map(jid => { const j = getJobById(jid); return j ? '<option value="' + jid + '"' + (prefs.filterJob === jid ? ' selected' : '') + '>' + escapeHtml(j.jobNumber) + '</option>' : ''; }).join('')}
-        </select>` : ''}
-        <select class="form-select" style="width:140px;" onchange="updateDocListPref('timesheets','sortBy',this.value); renderTimesheetsList();">
-          <option value="date" ${prefs.sortBy==='date'?'selected':''}>Sort by Date</option>
-          <option value="name" ${prefs.sortBy==='name'?'selected':''}>Sort by Name</option>
-          <option value="total" ${prefs.sortBy==='total'?'selected':''}>Sort by Cost</option>
-          <option value="hours" ${prefs.sortBy==='hours'?'selected':''}>Sort by Hours</option>
-        </select>
-        <button class="btn btn-secondary btn-sm" onclick="const p=getDashboardPrefs('timesheets'); p.sortDir=p.sortDir==='asc'?'desc':'asc'; saveDashboardPrefs('timesheets',p); renderTimesheetsList();">${prefs.sortDir === 'asc' ? '\u25b2 Asc' : '\u25bc Desc'}</button>
-      </div>
-    </div>
-    ${entries.length === 0 ? '<p class="intro-text">No timesheet entries found.</p>' : ''}
-    ${entries.map(t => {
+    ${entries.length === 0 ? '<p class="intro-text">No timesheet entries yet.</p>' : ''}
+    ${entries.slice().reverse().map(t => {
       const job = jobs.find(j => j.id === t.jobId);
       const totalHrs = (t.hoursRegular||0) + (t.hoursOvertime||0) + (t.hoursTravel||0);
-      const empType = t.employeeType ? empTypes.find(et => et.id === t.employeeType) : null;
-      const typeBadge = empType ? '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:' + empType.color + '20;color:' + empType.color + ';margin-left:8px;">' + escapeHtml(empType.name) + '</span>' : '';
       return `
       <div class="doc-row" onclick="editTimesheet('${t.id}')">
         <div class="doc-row-info">
-          <div class="doc-row-number">${escapeHtml(t.employeeName || 'Unnamed')} \u2014 ${formatDateShort(t.date)} ${typeBadge}</div>
-          <div class="doc-row-meta">${job ? escapeHtml(job.jobNumber + ' \u2014 ' + job.name) : 'No job linked'} \u00b7 ${totalHrs.toFixed(1)}h</div>
+          <div class="doc-row-number">${escapeHtml(t.employeeName || 'Unnamed')} — ${formatDateShort(t.date)}</div>
+          <div class="doc-row-meta">${job ? escapeHtml(job.jobNumber + ' — ' + job.name) : 'No job linked'} · ${totalHrs.toFixed(1)}h</div>
         </div>
         <div class="doc-row-actions">
           <span class="doc-row-total">${formatCurrency(t.totalCost)}</span>
-          <button class="btn-icon" onclick="event.stopPropagation(); confirmDelete('timesheets','${t.id}','Timesheet')" title="Delete">\ud83d\uddd1</button>
+          <button class="btn-icon" onclick="event.stopPropagation(); confirmDelete('timesheets','${t.id}','Timesheet')" title="Delete">🗑</button>
         </div>
       </div>`;
     }).join('')}
@@ -2660,12 +1986,6 @@ function renderTimesheetEditor(ts) {
       <div class="form-grid">
         <div class="form-group"><label class="form-label">Date</label><input class="form-input" type="date" id="ts-date" value="${ts.date}"></div>
         <div class="form-group"><label class="form-label">Employee Name</label><input class="form-input" id="ts-employee" value="${escapeHtml(ts.employeeName)}"></div>
-        <div class="form-group"><label class="form-label">Employee Type</label>
-          <select class="form-select" id="ts-empType" onchange="applyEmployeeTypeRates()">
-            <option value="">— Select Type —</option>
-            ${getEmployeeTypes().map(t => '<option value="' + t.id + '"' + (ts.employeeType === t.id ? ' selected' : '') + '>' + escapeHtml(t.name) + ' (' + formatCurrency(t.defaultRate) + '/hr)</option>').join('')}
-          </select>
-        </div>
         <div class="form-group"><label class="form-label">Job</label>
           <select class="form-select" id="ts-job">
             <option value="">— No Job —</option>
@@ -2728,28 +2048,10 @@ function recalcTimesheet() {
   document.getElementById('ts-total').textContent = formatCurrency(cR + cO + cT);
 }
 
-function applyEmployeeTypeRates() {
-  const typeId = document.getElementById('ts-empType')?.value;
-  if (!typeId) return;
-  const empType = getEmployeeTypeById(typeId);
-  if (!empType) return;
-  const rs = getRateSheet();
-  const straightRate = (rs.laborRates.find(r => r.id === 'straight') || {}).rate || 150;
-  const otRate = (rs.laborRates.find(r => r.id === 'overtime') || {}).rate || 225;
-  const travelRate = (rs.laborRates.find(r => r.id === 'travel') || {}).rate || 150;
-  // Scale rates based on employee type vs standard rate
-  const ratio = empType.defaultRate / straightRate;
-  document.getElementById('ts-rateReg').value = (empType.defaultRate).toFixed(2);
-  document.getElementById('ts-rateOT').value = (otRate * ratio).toFixed(2);
-  document.getElementById('ts-rateTravel').value = (travelRate * ratio).toFixed(2);
-  recalcTimesheet();
-}
-
 function saveCurrentTimesheet() {
   const ts = window._currentTimesheet;
   ts.date = document.getElementById('ts-date').value;
   ts.employeeName = document.getElementById('ts-employee').value;
-  ts.employeeType = document.getElementById('ts-empType')?.value || '';
   ts.jobId = document.getElementById('ts-job').value;
   ts.description = document.getElementById('ts-desc').value;
   ts.hoursRegular = parseFloat(document.getElementById('ts-hrsReg').value) || 0;
@@ -5017,41 +4319,6 @@ function renderSettings() {
       </div>
       <p style="font-size:12px;color:var(--text-muted);margin-top:8px;">When disabled, the company logo will be omitted from all exported PDF documents (Quotes, Invoices, POs, Letterheads, Estimates, Timesheets, Equipment Certificates, P&L, and Tax Summaries).</p>
     </div>
-    <div class="card">
-      <div class="card-title"><div class="accent-bar"></div>Internal Document Password</div>
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Set a default password for internal-only documents (Draft, In Review status). When a document is in an internal status, its PDF export can be password-protected with this value.</p>
-      <div class="form-grid">
-        <div class="form-group"><label class="form-label">Internal Document Password</label><input class="form-input" id="s-internalPwd" value="${escapeHtml(getInternalDocPassword())}" placeholder="internalonly"></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title"><div class="accent-bar"></div>Skill Detail on Customer Documents</div>
-      <div class="form-group" style="display:flex;align-items:center;gap:12px;">
-        <label class="form-label" style="margin:0;">Show Employee Type / Skill Level on Quotes & Invoices</label>
-        <div class="theme-toggle ${getShowSkillDetail() ? 'active' : ''}" id="s-skillDetailToggle" onclick="toggleSkillDetail()" style="cursor:pointer;">
-          <div class="toggle-knob"></div>
-        </div>
-        <span style="font-size:13px;color:var(--text-secondary);" id="s-skillDetailLabel">${getShowSkillDetail() ? 'Shown' : 'Hidden'}</span>
-      </div>
-      <p style="font-size:12px;color:var(--text-muted);margin-top:8px;">When enabled, employee type/skill level will appear on customer-facing documents (quotes, invoices). When disabled, only generic labor descriptions are shown.</p>
-    </div>
-    <div class="card">
-      <div class="card-title"><div class="accent-bar"></div>Employee Types / Classifications</div>
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Define employee types with default billing rates. These are used in timesheets, estimates, and KPI tracking.</p>
-      <div id="s-empTypes"></div>
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <button class="btn btn-secondary btn-sm" onclick="addNewEmployeeType()">+ Add Employee Type</button>
-        <button class="btn btn-secondary btn-sm" onclick="resetEmployeeTypes()">Reset to Defaults</button>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title"><div class="accent-bar"></div>Document Status Classifications</div>
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Configure which document statuses are classified as 'Internal' (password-protected when exported) vs 'External' (customer-facing). Drag statuses between columns to reclassify them.</p>
-      <div id="s-docClassManager"></div>
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <button class="btn btn-secondary btn-sm" onclick="resetDocClassifications()">Reset to Defaults</button>
-      </div>
-    </div>
     <div style="display:flex;gap:12px;margin-top:20px;">
       <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
     </div>
@@ -5086,8 +4353,6 @@ function renderSettings() {
       </div>`;
     }).join('');
   }
-  renderSettingsEmployeeTypes();
-  renderDocClassManager();
 }
 
 function handleLogoUpload(event, mode) {
@@ -5127,119 +4392,6 @@ function togglePdfLogo() {
   showToast(company.showLogoOnPdf ? 'Logo will appear on PDFs' : 'Logo hidden from PDFs');
 }
 
-function toggleSkillDetail() {
-  const show = !getShowSkillDetail();
-  setShowSkillDetail(show);
-  const toggle = document.getElementById('s-skillDetailToggle');
-  const label = document.getElementById('s-skillDetailLabel');
-  if (toggle) toggle.classList.toggle('active', show);
-  if (label) label.textContent = show ? 'Shown' : 'Hidden';
-  showToast(show ? 'Skill detail will appear on customer docs' : 'Skill detail hidden from customer docs');
-}
-
-function renderSettingsEmployeeTypes() {
-  const container = document.getElementById('s-empTypes');
-  if (!container) return;
-  const types = getEmployeeTypes();
-  container.innerHTML = types.map((t, i) => `
-    <div class="mini-row" style="padding:10px 12px;display:flex;align-items:center;gap:12px;">
-      <input type="color" value="${t.color}" style="width:30px;height:30px;border:none;cursor:pointer;" onchange="updateEmpType(${i},'color',this.value)">
-      <div style="flex:1;">
-        <input class="form-input" value="${escapeHtml(t.name)}" placeholder="Type name" style="font-weight:600;margin-bottom:4px;" onchange="updateEmpType(${i},'name',this.value)">
-        <input class="form-input" value="${escapeHtml(t.description || '')}" placeholder="Description" style="font-size:12px;" onchange="updateEmpType(${i},'description',this.value)">
-      </div>
-      <div style="width:120px;">
-        <label style="font-size:11px;color:var(--text-secondary);">Default Rate</label>
-        <input class="form-input" type="number" value="${t.defaultRate}" min="0" step="5" onchange="updateEmpType(${i},'defaultRate',parseFloat(this.value)||0)">
-      </div>
-      <button class="btn-icon" onclick="removeEmpType(${i})" title="Remove">\u2715</button>
-    </div>
-  `).join('');
-}
-
-function updateEmpType(idx, key, value) {
-  const types = getEmployeeTypes();
-  if (types[idx]) { types[idx][key] = value; saveEmployeeTypes(types); }
-}
-
-function removeEmpType(idx) {
-  const types = getEmployeeTypes();
-  types.splice(idx, 1);
-  saveEmployeeTypes(types);
-  renderSettingsEmployeeTypes();
-}
-
-function addNewEmployeeType() {
-  const types = getEmployeeTypes();
-  types.push({ id: 'custom_' + generateId(), name: 'New Type', description: '', defaultRate: 100, color: '#6B7280' });
-  saveEmployeeTypes(types);
-  renderSettingsEmployeeTypes();
-}
-
-function resetEmployeeTypes() {
-  if (!confirm('Reset employee types to defaults? Custom types will be lost.')) return;
-  saveEmployeeTypes(DEFAULT_EMPLOYEE_TYPES.map(t => ({...t})));
-  renderSettingsEmployeeTypes();
-  showToast('Employee types reset to defaults');
-}
-
-function renderDocClassManager() {
-  const container = document.getElementById('s-docClassManager');
-  if (!container) return;
-  const cls = getDocClassifications();
-  const docTypes = Object.keys(cls);
-  const typeLabels = { quote: 'Quotes', invoice: 'Invoices', estimate: 'Estimates', po: 'Purchase Orders', workorder: 'Work Orders', proposal: 'Proposals' };
-
-  container.innerHTML = docTypes.map(type => {
-    const statuses = cls[type].statuses;
-    const internal = statuses.filter(s => s.classification === 'internal');
-    const external = statuses.filter(s => s.classification === 'external');
-    return `
-      <div style="margin-bottom:16px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:8px;">${typeLabels[type] || type}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-          <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:12px;">
-            <div style="font-size:11px;font-weight:600;color:#F59E0B;margin-bottom:8px;">\ud83d\udd12 INTERNAL (Password Protected)</div>
-            ${internal.map(s => `
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;margin-bottom:4px;border-radius:4px;background:${s.color}15;border:1px solid ${s.color}30;">
-                <span style="font-size:12px;color:${s.color};font-weight:600;">${escapeHtml(s.label)}</span>
-                <button class="btn-icon" style="font-size:10px;" onclick="moveDocStatus('${type}','${s.id}','external')" title="Move to External">\u2192</button>
-              </div>
-            `).join('')}
-          </div>
-          <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:12px;">
-            <div style="font-size:11px;font-weight:600;color:#22C55E;margin-bottom:8px;">\ud83c\udf10 EXTERNAL (Customer-Facing)</div>
-            ${external.map(s => `
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;margin-bottom:4px;border-radius:4px;background:${s.color}15;border:1px solid ${s.color}30;">
-                <button class="btn-icon" style="font-size:10px;" onclick="moveDocStatus('${type}','${s.id}','internal')" title="Move to Internal">\u2190</button>
-                <span style="font-size:12px;color:${s.color};font-weight:600;">${escapeHtml(s.label)}</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      </div>`;
-  }).join('');
-}
-
-function moveDocStatus(docType, statusId, newClassification) {
-  const cls = getDocClassifications();
-  if (!cls[docType]) return;
-  const status = cls[docType].statuses.find(s => s.id === statusId);
-  if (status) {
-    status.classification = newClassification;
-    saveDocClassifications(cls);
-    renderDocClassManager();
-    showToast(status.label + ' moved to ' + newClassification);
-  }
-}
-
-function resetDocClassifications() {
-  if (!confirm('Reset document classifications to defaults?')) return;
-  localStorage.removeItem('psva_doc_classifications');
-  renderDocClassManager();
-  showToast('Document classifications reset to defaults');
-}
-
 function saveSettings() {
   const company = getCompany();
   company.name = document.getElementById('s-name').value;
@@ -5258,9 +4410,6 @@ function saveSettings() {
   company.travelRate = findRate('travel') || company.travelRate;
   company.homePage = document.getElementById('s-homePage').value;
   saveCompany(company);
-  // Save internal doc password
-  const pwd = document.getElementById('s-internalPwd')?.value;
-  if (pwd !== undefined) setInternalDocPassword(pwd);
   updateSidebarLogo();
   showToast('Settings saved!');
 }
@@ -5376,551 +4525,9 @@ function factoryResetTool() {
   showToast('Factory reset complete. All data has been erased. A backup was downloaded.', 'success');
 }
 
-// ============================================================
-// DATA MIGRATION PIPELINE
-// ============================================================
-// Migrates data from any older version to the current version.
-// Each migration step handles one version bump (e.g., v3→v4, v4→v5).
-// Unknown/missing fields are filled with safe defaults.
-function migrateData(data) {
-  const log = [];
-  let v = data.version || 1;
-
-  // --- Detect unversioned files (v1-v2 era, no version field) ---
-  if (!data.version) {
-    v = 1;
-    log.push('No version detected — treating as v1 (earliest format).');
-  }
-
-  // --- v1 → v2: Added calendar, technicians, customers ---
-  if (v < 2) {
-    if (!data.customers) data.customers = [];
-    if (!data.technicians) data.technicians = [];
-    if (!data.calendarEvents) data.calendarEvents = [];
-    log.push('v1→v2: Added empty customers, technicians, calendarEvents.');
-    v = 2;
-  }
-
-  // --- v2 → v3: Added rate sheet, 1099, quarterly tax, CPA notes ---
-  if (v < 3) {
-    if (!data.rateSheet) data.rateSheet = null;
-    if (!data.contractors1099) data.contractors1099 = [];
-    if (!data.quarterlyTaxPayments) data.quarterlyTaxPayments = [];
-    log.push('v2→v3: Added rateSheet, 1099 contractors, quarterly tax payments.');
-    v = 3;
-  }
-
-  // --- v3 → v4: Added test reports, safety reports, certificates, asset transfers, etc. ---
-  if (v < 4) {
-    if (!data.testReports) data.testReports = [];
-    if (!data.safetyreports) data.safetyreports = [];
-    if (!data.certificates) data.certificates = [];
-    if (!data.assettransfers) data.assettransfers = [];
-    if (!data.creditmemos) data.creditmemos = [];
-    if (!data.paymentreceipts) data.paymentreceipts = [];
-    if (!data.statements) data.statements = [];
-    log.push('v3→v4: Added test reports, safety reports, certificates, asset transfers, credit memos, payment receipts, statements.');
-    v = 4;
-  }
-
-  // --- v4 → v5: Added PDF themes, custom colors, sidebar order, calendar people ---
-  if (v < 5) {
-    if (!data.pdfTheme) data.pdfTheme = 'classic-dark';
-    if (data.pdfDarkMode === undefined) data.pdfDarkMode = true;
-    if (!data.customThemeColors) data.customThemeColors = null;
-    if (!data.calendarPeople) data.calendarPeople = [];
-    if (!data.sidebarOrder) data.sidebarOrder = '';
-    if (!data.quoteTermsTemplate) data.quoteTermsTemplate = '';
-    log.push('v4→v5: Added PDF themes, custom colors, calendar people, sidebar order.');
-    v = 5;
-  }
-
-  // --- v5 → v6: Added employee types, doc classifications, internal password, skill detail ---
-  if (v < 6) {
-    if (!data.employeeTypes) data.employeeTypes = null; // will use defaults
-    if (!data.docClassifications) data.docClassifications = null; // will use defaults
-    if (!data.internalDocPassword) data.internalDocPassword = 'internalonly';
-    if (data.showSkillDetail === undefined) data.showSkillDetail = false;
-    // Migrate documents that don't have status fields
-    if (data.quotes && Array.isArray(data.quotes)) {
-      data.quotes.forEach(q => { if (!q.status) q.status = 'draft'; });
-    }
-    if (data.invoices && Array.isArray(data.invoices)) {
-      data.invoices.forEach(inv => { if (!inv.status) inv.status = 'draft'; });
-    }
-    // Migrate timesheets that don't have employeeType
-    if (data.timesheets && Array.isArray(data.timesheets)) {
-      data.timesheets.forEach(ts => { if (!ts.employeeType) ts.employeeType = ''; });
-    }
-    log.push('v5→v6: Added employee types, doc classifications, internal password, skill detail. Migrated document statuses.');
-    v = 6;
-  }
-
-  data.version = v;
-  return { data, log, originalVersion: data.version || 1 };
-}
-
-// Validates a single document object for minimum required fields
-// Returns { valid, issues: [{field, message, defaultValue, severity, editable}], doc }
-function validateDocument(doc, type) {
-  const issues = [];
-  if (!doc || typeof doc !== 'object') return { valid: false, issues: [{field: '_root', message: 'Not a valid object', severity: 'error'}] };
-  
-  // Ensure ID exists
-  if (!doc.id || doc.id === 'TEMPLATE') {
-    doc.id = type + '-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
-    issues.push({field: 'id', message: 'Missing ID — auto-generated', defaultValue: doc.id, severity: 'info', editable: false});
-  }
-  
-  // Ensure date exists
-  if (!doc.date) {
-    doc.date = todayStr();
-    issues.push({field: 'date', message: 'Missing date — set to today', defaultValue: doc.date, severity: 'warning', editable: true, inputType: 'date'});
-  }
-  
-  // Type-specific validations
-  if (['quote', 'invoice'].includes(type)) {
-    if (!doc.lineItems) doc.lineItems = [];
-    if (!Array.isArray(doc.lineItems)) {
-      doc.lineItems = [];
-      issues.push({field: 'lineItems', message: 'Invalid format — reset to empty', severity: 'warning', editable: false});
-    }
-    // Normalize line item field names
-    let lineItemIssues = false;
-    doc.lineItems = doc.lineItems.map((li, idx) => {
-      const normalized = {...li};
-      if (li.qty !== undefined && li.quantity === undefined) { normalized.quantity = li.qty; delete normalized.qty; lineItemIssues = true; }
-      if (li.total !== undefined && li.unitPrice === undefined) { normalized.unitPrice = li.total / (normalized.quantity || 1); lineItemIssues = true; }
-      if (!normalized.item) normalized.item = idx + 1;
-      if (!normalized.unit) normalized.unit = 'Labor';
-      if (normalized.taxable === undefined) normalized.taxable = false;
-      return normalized;
-    });
-    if (lineItemIssues) {
-      issues.push({field: 'lineItems', message: 'Old field names normalized (qty→quantity, total→unitPrice)', severity: 'info', editable: false});
-    }
-    // Check for line items with zero pricing
-    doc.lineItems.forEach((li, idx) => {
-      if ((li.unitPrice === 0 || li.unitPrice === undefined) && li.description) {
-        issues.push({field: 'lineItems[' + idx + '].unitPrice', message: 'Line item "' + (li.description || '#' + (idx+1)) + '" has $0.00 unit price', defaultValue: '0', severity: 'warning', editable: true, inputType: 'number'});
-      }
-    });
-    if (!doc.status) {
-      doc.status = 'draft';
-      issues.push({field: 'status', message: 'Missing status — defaulted to "draft"', defaultValue: 'draft', severity: 'warning', editable: true, inputType: 'select', options: type === 'quote' ? ['draft','in_review','sent','accepted','rejected','expired'] : ['draft','sent','paid','overdue','void']});
-    }
-    if (!doc.customerName && !doc.customerCompany) {
-      issues.push({field: 'customerName', message: 'Missing customer name', defaultValue: '', severity: 'warning', editable: true, inputType: 'text'});
-    }
-    // Normalize terms
-    if (doc.terms && typeof doc.terms === 'string') {
-      doc.terms = doc.terms.split(',').map(t => t.trim()).filter(t => t.length > 0);
-      issues.push({field: 'terms', message: 'Converted terms from string to array', severity: 'info', editable: false});
-    }
-  }
-  
-  if (type === 'timesheets') {
-    if (!doc.employeeName) {
-      issues.push({field: 'employeeName', message: 'Missing employee name', defaultValue: '', severity: 'error', editable: true, inputType: 'text'});
-    }
-    if (!doc.employeeType) {
-      doc.employeeType = '';
-      issues.push({field: 'employeeType', message: 'Missing employee type — blank', defaultValue: '', severity: 'warning', editable: true, inputType: 'select', options: getEmployeeTypes().map(et => et.name)});
-    }
-    if (doc.hoursRegular === undefined || doc.hoursRegular === 0) {
-      doc.hoursRegular = doc.hoursRegular || 0;
-      issues.push({field: 'hoursRegular', message: 'Regular hours is 0', defaultValue: '0', severity: 'warning', editable: true, inputType: 'number'});
-    }
-    if (doc.rateRegular === undefined || doc.rateRegular === 0) {
-      doc.rateRegular = doc.rateRegular || 0;
-      issues.push({field: 'rateRegular', message: 'Regular rate is $0.00', defaultValue: '0', severity: 'warning', editable: true, inputType: 'number'});
-    }
-  }
-
-  if (type === 'estimates') {
-    if (!doc.estimateNumber && !doc.docNumber) {
-      issues.push({field: 'estimateNumber', message: 'Missing estimate number', defaultValue: '', severity: 'warning', editable: true, inputType: 'text'});
-    }
-  }
-
-  // Generic checks for doc types with customer objects
-  if (['workorder','changeorder','proposal','contracts','creditmemo','paymentreceipt','certificates','assettransfers','safetyreports'].includes(type)) {
-    if (!doc.status) {
-      doc.status = 'draft';
-      issues.push({field: 'status', message: 'Missing status — defaulted to "draft"', defaultValue: 'draft', severity: 'warning', editable: true, inputType: 'text'});
-    }
-  }
-  
-  return { valid: true, issues, doc };
-}
-
-// ============================================================
-// IMPORT REVIEW MODAL
-// ============================================================
-// Scans import data and groups issues by job for interactive review
-function scanImportData(data, origVersion) {
-  origVersion = origVersion || data.version || CURRENT_DATA_VERSION;
-  const jobs = data.jobs || [];
-  const types = ['estimates','quotes','invoices','po','letterheads','timesheets','travel','receipts','pnl','inventory','equipment','testReports','workorders','changeorders','proposals','contracts','creditmemos','paymentreceipts','statements','certificates','assettransfers','safetyreports'];
-  const storageTypes = ['estimates','quote','invoice','po','letterhead','timesheets','travel','receipts','pnl','inventory','equipment','testreports','workorder','changeorder','proposal','contracts','creditmemo','paymentreceipt','statements','certificates','assettransfers','safetyreports'];
-  const typeLabels = { estimates: 'Estimate', quote: 'Quote', invoice: 'Invoice', po: 'Purchase Order', letterhead: 'Letterhead', timesheets: 'Timesheet', travel: 'Travel', receipts: 'Receipt', pnl: 'P&L', inventory: 'Inventory', equipment: 'Equipment', testreports: 'Test Report', workorder: 'Work Order', changeorder: 'Change Order', proposal: 'Proposal', contracts: 'Contract', creditmemo: 'Credit Memo', paymentreceipt: 'Payment Receipt', statements: 'Statement', certificates: 'Certificate', assettransfers: 'Asset Transfer', safetyreports: 'Safety Report' };
-
-  // Build job lookup
-  const jobMap = {};
-  jobs.forEach(j => { jobMap[j.id] = j; });
-
-  // Group: { jobId: { job, records: [{type, storageType, doc, issues, include}] } }
-  const groups = {};
-  const addToGroup = (jobId, record) => {
-    const gid = jobId || '__unlinked__';
-    if (!groups[gid]) {
-      groups[gid] = { job: jobMap[jobId] || null, records: [] };
-    }
-    groups[gid].records.push(record);
-  };
-
-  let totalRecords = 0;
-  let totalIssues = 0;
-  let totalWarnings = 0;
-
-  // Scan jobs themselves
-  jobs.forEach(j => {
-    const jIssues = [];
-    if (!j.name && !j.jobNumber) jIssues.push({field: 'name', message: 'Missing job name', defaultValue: '', severity: 'warning', editable: true, inputType: 'text'});
-    if (!j.customer || (!j.customer.name && !j.customer.company)) jIssues.push({field: 'customer', message: 'Missing customer info', defaultValue: '', severity: 'warning', editable: true, inputType: 'text'});
-    totalRecords++;
-    totalIssues += jIssues.filter(i => i.severity === 'error').length;
-    totalWarnings += jIssues.filter(i => i.severity === 'warning').length;
-    addToGroup(j.id, { type: 'Job', storageType: 'jobs', doc: j, issues: jIssues, include: true });
-  });
-
-  // Scan all document types
-  types.forEach((key, idx) => {
-    const arr = data[key];
-    if (!arr || !Array.isArray(arr)) return;
-    const sType = storageTypes[idx];
-    arr.forEach(doc => {
-      const result = validateDocument({...doc}, sType);
-      // Add migration-filled warnings for fields auto-populated during version migration
-      if (origVersion < 6 && ['quote', 'invoice'].includes(sType)) {
-        // Status was auto-filled to 'draft' during v5→v6 migration
-        const hasStatusIssue = result.issues.some(i => i.field === 'status');
-        if (!hasStatusIssue && doc.status === 'draft') {
-          result.issues.push({field: 'status', message: 'Auto-set to "draft" during migration from v' + origVersion + ' — verify correct status', defaultValue: 'draft', severity: 'warning', editable: true, inputType: 'select', options: sType === 'quote' ? ['draft','in_review','sent','accepted','rejected','expired'] : ['draft','sent','paid','overdue','void']});
-        }
-      }
-      if (origVersion < 6 && sType === 'timesheets') {
-        // employeeType was auto-filled to '' during v5→v6 migration
-        const hasEmpTypeIssue = result.issues.some(i => i.field === 'employeeType');
-        if (!hasEmpTypeIssue && (!doc.employeeType || doc.employeeType === '')) {
-          result.issues.push({field: 'employeeType', message: 'Employee type not set — added in v6, please assign', defaultValue: '', severity: 'warning', editable: true, inputType: 'select', options: getEmployeeTypes().map(et => et.name)});
-        }
-        // Rate fields may be 0 from old data
-        if (!result.issues.some(i => i.field === 'rateRegular') && (doc.rateRegular === 0 || doc.rateRegular === undefined)) {
-          result.issues.push({field: 'rateRegular', message: 'Regular rate is $0.00 — verify billing rate', defaultValue: '0', severity: 'warning', editable: true, inputType: 'number'});
-        }
-      }
-      if (!result.valid) {
-        totalRecords++;
-        totalIssues++;
-        addToGroup(doc.jobId, { type: typeLabels[sType] || sType, storageType: sType, doc: doc, issues: result.issues, include: false });
-        return;
-      }
-      const editableIssues = result.issues.filter(i => i.severity === 'warning' || i.severity === 'error');
-      totalRecords++;
-      totalIssues += result.issues.filter(i => i.severity === 'error').length;
-      totalWarnings += editableIssues.length;
-      addToGroup(doc.jobId, { type: typeLabels[sType] || sType, storageType: sType, doc: result.doc, issues: result.issues, include: true });
-    });
-  });
-
-  return { groups, totalRecords, totalIssues, totalWarnings, hasIssues: (totalIssues + totalWarnings) > 0 };
-}
-
-function showImportReviewModal(data, origVersion, migration, onConfirm, onCancel) {
-  const scan = scanImportData(data, origVersion);
-
-  // If no issues at all, skip the modal
-  if (!scan.hasIssues) {
-    onConfirm(data, scan);
-    return;
-  }
-
-  // Build the modal
-  const overlay = document.createElement('div');
-  overlay.id = 'import-review-overlay';
-  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
-
-  const modal = document.createElement('div');
-  modal.style.cssText = 'background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#e0e0e0);border-radius:12px;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);border:1px solid var(--border-color,#333);';
-
-  // Header
-  const header = document.createElement('div');
-  header.style.cssText = 'padding:20px 24px;border-bottom:1px solid var(--border-color,#333);flex-shrink:0;';
-  header.innerHTML = `
-    <h2 style="margin:0 0 8px 0;font-size:20px;">Import Review</h2>
-    <div style="font-size:13px;color:var(--text-secondary,#888);">
-      ${origVersion < CURRENT_DATA_VERSION ? '<span style="background:#3b82f6;color:white;padding:2px 8px;border-radius:4px;font-size:11px;margin-right:8px;">Migrated v' + origVersion + ' → v' + CURRENT_DATA_VERSION + '</span>' : ''}
-      ${origVersion > CURRENT_DATA_VERSION ? '<span style="background:#f59e0b;color:black;padding:2px 8px;border-radius:4px;font-size:11px;margin-right:8px;">Newer version (v' + origVersion + ')</span>' : ''}
-      <strong>${scan.totalRecords}</strong> records found · <strong style="color:#f59e0b;">${scan.totalWarnings}</strong> fields need review · <strong style="color:#ef4444;">${scan.totalIssues}</strong> errors
-    </div>
-    <div style="font-size:12px;color:var(--text-secondary,#888);margin-top:6px;">Review the flagged fields below. You can correct values, skip individual records, or cancel the entire import.</div>
-  `;
-  modal.appendChild(header);
-
-  // Body (scrollable)
-  const body = document.createElement('div');
-  body.style.cssText = 'flex:1;overflow-y:auto;padding:16px 24px;';
-
-  // Sort groups: jobs with issues first, then unlinked
-  const groupKeys = Object.keys(scan.groups).sort((a, b) => {
-    if (a === '__unlinked__') return 1;
-    if (b === '__unlinked__') return -1;
-    const aIssues = scan.groups[a].records.reduce((s, r) => s + r.issues.filter(i => i.severity !== 'info').length, 0);
-    const bIssues = scan.groups[b].records.reduce((s, r) => s + r.issues.filter(i => i.severity !== 'info').length, 0);
-    return bIssues - aIssues;
-  });
-
-  groupKeys.forEach(gid => {
-    const group = scan.groups[gid];
-    const groupIssueCount = group.records.reduce((s, r) => s + r.issues.filter(i => i.severity !== 'info').length, 0);
-    const isUnlinked = gid === '__unlinked__';
-    const jobLabel = isUnlinked ? 'General / Unlinked Records' : (group.job ? escapeHtml((group.job.jobNumber || '') + ' — ' + (group.job.name || 'Untitled Job')) : 'Unknown Job (' + gid.substring(0, 8) + ')');
-
-    const section = document.createElement('div');
-    section.style.cssText = 'margin-bottom:16px;border:1px solid var(--border-color,#333);border-radius:8px;overflow:hidden;';
-
-    // Section header (collapsible)
-    const sectionHeader = document.createElement('div');
-    sectionHeader.style.cssText = 'padding:12px 16px;background:var(--bg-secondary,#16213e);cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none;';
-    sectionHeader.innerHTML = `
-      <div>
-        <span style="font-weight:600;">${isUnlinked ? '📋' : '📁'} ${jobLabel}</span>
-        <span style="font-size:12px;color:var(--text-secondary,#888);margin-left:8px;">${group.records.length} record(s)</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        ${groupIssueCount > 0 ? '<span style="background:#f59e0b;color:black;padding:1px 6px;border-radius:4px;font-size:11px;">' + groupIssueCount + ' issue(s)</span>' : '<span style="background:#22c55e;color:white;padding:1px 6px;border-radius:4px;font-size:11px;">OK</span>'}
-        <span class="collapse-arrow" style="font-size:14px;transition:transform 0.2s;">▼</span>
-      </div>
-    `;
-    section.appendChild(sectionHeader);
-
-    // Section body
-    const sectionBody = document.createElement('div');
-    sectionBody.style.cssText = 'padding:0;' + (groupIssueCount === 0 ? 'display:none;' : '');
-
-    sectionHeader.onclick = () => {
-      const isHidden = sectionBody.style.display === 'none';
-      sectionBody.style.display = isHidden ? 'block' : 'none';
-      sectionHeader.querySelector('.collapse-arrow').style.transform = isHidden ? '' : 'rotate(-90deg)';
-    };
-
-    group.records.forEach((record, rIdx) => {
-      const hasEditableIssues = record.issues.filter(i => i.severity !== 'info').length > 0;
-      const card = document.createElement('div');
-      card.style.cssText = 'padding:12px 16px;border-top:1px solid var(--border-color,#333);' + (!record.include ? 'opacity:0.4;' : '');
-      card.setAttribute('data-group', gid);
-      card.setAttribute('data-ridx', rIdx);
-
-      const docLabel = record.doc.docNumber || record.doc.estimateNumber || record.doc.employeeName || record.doc.name || record.doc.id?.substring(0, 12) || 'Record';
-      const typeBadgeColor = {'Quote':'#3b82f6','Invoice':'#8b5cf6','Estimate':'#10b981','Timesheet':'#f59e0b','Job':'#ef4444','Purchase Order':'#06b6d4','Work Order':'#ec4899','Safety Report':'#f97316'}[record.type] || '#6b7280';
-
-      let cardHtml = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${hasEditableIssues ? '8' : '0'}px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="background:${typeBadgeColor};color:white;padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;">${record.type}</span>
-            <span style="font-weight:500;">${escapeHtml(docLabel)}</span>
-            ${record.doc.date ? '<span style="font-size:12px;color:var(--text-secondary,#888);">' + record.doc.date + '</span>' : ''}
-          </div>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
-            <input type="checkbox" ${record.include ? 'checked' : ''} onchange="window._importReviewToggleRecord('${gid}', ${rIdx}, this.checked)" style="cursor:pointer;">
-            Include
-          </label>
-        </div>
-      `;
-
-      // Show editable issues
-      const editableIssues = record.issues.filter(i => i.severity !== 'info');
-      if (editableIssues.length > 0) {
-        cardHtml += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
-        cardHtml += '<tr style="color:var(--text-secondary,#888);"><td style="padding:2px 8px;width:25%;">Field</td><td style="padding:2px 8px;width:40%;">Issue</td><td style="padding:2px 8px;width:35%;">Value</td></tr>';
-        editableIssues.forEach((issue, iIdx) => {
-          const sevColor = issue.severity === 'error' ? '#ef4444' : '#f59e0b';
-          let inputHtml = '';
-          if (issue.editable) {
-            const inputId = 'ir-' + gid.substring(0, 8) + '-' + rIdx + '-' + iIdx;
-            if (issue.inputType === 'select' && issue.options) {
-              inputHtml = '<select id="' + inputId + '" style="background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#e0e0e0);border:1px solid var(--border-color,#333);border-radius:4px;padding:2px 6px;font-size:12px;width:100%;">';
-              inputHtml += '<option value="">(select)</option>';
-              issue.options.forEach(opt => { inputHtml += '<option value="' + escapeHtml(opt) + '"' + (issue.defaultValue === opt ? ' selected' : '') + '>' + escapeHtml(opt) + '</option>'; });
-              inputHtml += '</select>';
-            } else if (issue.inputType === 'number') {
-              inputHtml = '<input type="number" id="' + inputId + '" value="' + (issue.defaultValue || '0') + '" step="0.01" style="background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#e0e0e0);border:1px solid var(--border-color,#333);border-radius:4px;padding:2px 6px;font-size:12px;width:100%;">';
-            } else if (issue.inputType === 'date') {
-              inputHtml = '<input type="date" id="' + inputId + '" value="' + (issue.defaultValue || '') + '" style="background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#e0e0e0);border:1px solid var(--border-color,#333);border-radius:4px;padding:2px 6px;font-size:12px;width:100%;">';
-            } else {
-              inputHtml = '<input type="text" id="' + inputId + '" value="' + escapeHtml(issue.defaultValue || '') + '" placeholder="Enter value" style="background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#e0e0e0);border:1px solid var(--border-color,#333);border-radius:4px;padding:2px 6px;font-size:12px;width:100%;">';
-            }
-          } else {
-            inputHtml = '<span style="font-size:11px;color:var(--text-secondary,#888);">' + escapeHtml(String(issue.defaultValue || 'auto')) + '</span>';
-          }
-          cardHtml += `<tr><td style="padding:4px 8px;border-top:1px solid var(--border-color,#222);">${escapeHtml(issue.field)}</td><td style="padding:4px 8px;border-top:1px solid var(--border-color,#222);color:${sevColor};">${escapeHtml(issue.message)}</td><td style="padding:4px 8px;border-top:1px solid var(--border-color,#222);">${inputHtml}</td></tr>`;
-        });
-        cardHtml += '</table>';
-      }
-
-      // Show info-level issues as a subtle note
-      const infoIssues = record.issues.filter(i => i.severity === 'info');
-      if (infoIssues.length > 0) {
-        cardHtml += '<div style="font-size:11px;color:var(--text-secondary,#666);margin-top:4px;">ℹ ' + infoIssues.map(i => escapeHtml(i.message)).join(' · ') + '</div>';
-      }
-
-      card.innerHTML = cardHtml;
-      sectionBody.appendChild(card);
-    });
-
-    section.appendChild(sectionBody);
-    body.appendChild(section);
-  });
-
-  modal.appendChild(body);
-
-  // Footer
-  const footer = document.createElement('div');
-  footer.style.cssText = 'padding:16px 24px;border-top:1px solid var(--border-color,#333);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;flex-wrap:wrap;gap:8px;';
-  footer.innerHTML = `
-    <button id="ir-cancel" class="btn btn-secondary" style="min-width:140px;">Cancel Import</button>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button id="ir-accept-defaults" class="btn btn-secondary" style="min-width:160px;">Accept All Defaults</button>
-      <button id="ir-proceed" class="btn btn-primary" style="min-width:180px;">Proceed with Corrections</button>
-    </div>
-  `;
-  modal.appendChild(footer);
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
-
-  // Store scan data globally for the toggle function
-  window._importReviewScan = scan;
-  window._importReviewData = data;
-
-  window._importReviewToggleRecord = (gid, rIdx, checked) => {
-    scan.groups[gid].records[rIdx].include = checked;
-    const card = body.querySelector('[data-group="' + gid + '"][data-ridx="' + rIdx + '"]');
-    if (card) card.style.opacity = checked ? '1' : '0.4';
-  };
-
-  // Collect corrections from the modal inputs
-  function collectCorrections() {
-    Object.keys(scan.groups).forEach(gid => {
-      scan.groups[gid].records.forEach((record, rIdx) => {
-        if (!record.include) return;
-        const editableIssues = record.issues.filter(i => i.severity !== 'info' && i.editable);
-        editableIssues.forEach((issue, iIdx) => {
-          const inputId = 'ir-' + gid.substring(0, 8) + '-' + rIdx + '-' + iIdx;
-          const el = document.getElementById(inputId);
-          if (!el) return;
-          const val = el.value;
-          if (val === '' || val === issue.defaultValue) return; // No change
-          // Apply correction to the document
-          applyFieldCorrection(record.doc, issue.field, val, record.storageType);
-        });
-      });
-    });
-  }
-
-  // Cancel
-  document.getElementById('ir-cancel').onclick = () => {
-    overlay.remove();
-    delete window._importReviewScan;
-    delete window._importReviewData;
-    delete window._importReviewToggleRecord;
-    if (onCancel) onCancel();
-  };
-
-  // Accept defaults (import everything as-is)
-  document.getElementById('ir-accept-defaults').onclick = () => {
-    overlay.remove();
-    delete window._importReviewScan;
-    delete window._importReviewData;
-    delete window._importReviewToggleRecord;
-    onConfirm(data, scan, true);
-  };
-
-  // Proceed with corrections
-  document.getElementById('ir-proceed').onclick = () => {
-    collectCorrections();
-    overlay.remove();
-    delete window._importReviewScan;
-    delete window._importReviewData;
-    delete window._importReviewToggleRecord;
-    onConfirm(data, scan, false);
-  };
-}
-
-// Apply a user correction to a document field
-function applyFieldCorrection(doc, field, value, type) {
-  // Handle nested fields like lineItems[0].unitPrice
-  const liMatch = field.match(/^lineItems\[(\d+)\]\.(\w+)$/);
-  if (liMatch && doc.lineItems) {
-    const idx = parseInt(liMatch[1]);
-    const prop = liMatch[2];
-    if (doc.lineItems[idx]) {
-      doc.lineItems[idx][prop] = (prop === 'unitPrice' || prop === 'quantity') ? parseFloat(value) || 0 : value;
-    }
-    return;
-  }
-  // Handle customer object
-  if (field === 'customer' && typeof value === 'string') {
-    if (!doc.customer) doc.customer = {};
-    doc.customer.name = value;
-    return;
-  }
-  // Handle numeric fields
-  if (['hoursRegular', 'hoursOvertime', 'hoursTravel', 'rateRegular', 'rateOvertime', 'rateTravel'].includes(field)) {
-    doc[field] = parseFloat(value) || 0;
-    return;
-  }
-  // Default: set as string
-  doc[field] = value;
-}
-
-// Validates an entire backup file structure
-function validateBackupFile(data) {
-  const issues = [];
-  
-  if (!data || typeof data !== 'object') {
-    return { valid: false, issues: ['File is not a valid JSON object'] };
-  }
-  
-  // Check if it's a PSVA backup (has at least some expected keys)
-  const expectedKeys = ['jobs', 'quotes', 'invoices', 'timesheets', 'company', 'estimates'];
-  const matchingKeys = expectedKeys.filter(k => data[k] !== undefined);
-  
-  if (matchingKeys.length === 0 && !data.version) {
-    return { valid: false, issues: ['File does not appear to be a PS-VA backup. No recognized data fields found.'] };
-  }
-  
-  // Check version compatibility
-  const fileVersion = data.version || 1;
-  if (fileVersion > CURRENT_DATA_VERSION) {
-    issues.push(`File is from a newer version (v${fileVersion}) than this tool (v${CURRENT_DATA_VERSION}). Some data may not be recognized. Proceeding with best-effort import.`);
-  }
-  
-  // Validate arrays are actually arrays
-  const arrayFields = ['jobs', 'estimates', 'quotes', 'invoices', 'timesheets', 'customers', 'technicians'];
-  arrayFields.forEach(field => {
-    if (data[field] && !Array.isArray(data[field])) {
-      issues.push(`${field} is not an array — skipping`);
-      data[field] = [];
-    }
-  });
-  
-  return { valid: true, issues };
-}
-
 function exportAllData() {
   const data = {
-    version: CURRENT_DATA_VERSION,
+    version: 5,
     exportDate: new Date().toISOString(),
     company: getCompany(),
     jobs: getJobs(),
@@ -5963,10 +4570,6 @@ function exportAllData() {
     taxPkgNotesHeight: localStorage.getItem('psva_taxPkgNotesHeight') || '',
     sidebarOrder: localStorage.getItem('psva_sidebar_order') || '',
     customThemeColors: JSON.parse(localStorage.getItem('psva_custom_theme_colors') || 'null'),
-    employeeTypes: getEmployeeTypes(),
-    docClassifications: getDocClassifications(),
-    internalDocPassword: getInternalDocPassword(),
-    showSkillDetail: getShowSkillDetail(),
   };
   // Capture CPA notes for all years
   for (let y = 2020; y <= new Date().getFullYear() + 1; y++) {
@@ -5990,112 +4593,42 @@ function importAllData() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        let rawData;
-        try {
-          rawData = JSON.parse(ev.target.result);
-        } catch(parseErr) {
-          showToast('Import failed: File is not valid JSON. ' + parseErr.message, 'error');
-          return;
-        }
-
-        // Step 1: Validate the file structure
-        const validation = validateBackupFile(rawData);
-        if (!validation.valid) {
-          showToast('Import rejected: ' + validation.issues.join(' '), 'error');
-          return;
-        }
-
-        // Step 2: Run migration pipeline
-        const origVersion = rawData.version || 1;
-        const migration = migrateData(rawData);
-        const data = migration.data;
-
-        // Step 3: Show interactive review modal
-        showImportReviewModal(data, origVersion, migration, function onConfirm(reviewedData, scan, acceptedDefaults) {
-          // Perform the actual import using reviewed data
-          executeFullImport(reviewedData, scan, origVersion, migration, validation);
-        }, function onCancel() {
-          showToast('Import cancelled.', 'info');
+        const data = JSON.parse(ev.target.result);
+        if (data.company) saveCompany(data.company);
+        const types = ['jobs','estimates','quote','invoice','po','letterhead','timesheets','travel','receipts','pnl','inventory','equipment','testreports','workorder','changeorder','proposal','contracts','creditmemo','paymentreceipt','statements','certificates','assettransfers','safetyreports'];
+        const keys = ['jobs','estimates','quotes','invoices','po','letterheads','timesheets','travel','receipts','pnl','inventory','equipment','testReports','workorders','changeorders','proposals','contracts','creditmemos','paymentreceipts','statements','certificates','assettransfers','safetyreports'];
+        types.forEach((t, i) => {
+          const arr = data[keys[i]];
+          if (arr && Array.isArray(arr)) localStorage.setItem('psva_' + t, JSON.stringify(arr));
         });
-
-      } catch(err) {
-        console.error('[PS-VA Import] Unexpected error:', err);
-        showToast('Import failed: ' + err.message, 'error');
-      }
+        // Restore additional data
+        if (data.customers && Array.isArray(data.customers)) localStorage.setItem('psva_customers', JSON.stringify(data.customers));
+        if (data.technicians && Array.isArray(data.technicians)) localStorage.setItem('psva_technicians', JSON.stringify(data.technicians));
+        if (data.rateSheet) localStorage.setItem('psva_rate_sheet', JSON.stringify(data.rateSheet));
+        if (data.calendarEvents && Array.isArray(data.calendarEvents)) localStorage.setItem('psva_calendar_events', JSON.stringify(data.calendarEvents));
+        if (data.contractors1099 && Array.isArray(data.contractors1099)) save1099Contractors(data.contractors1099);
+        if (data.quarterlyTaxPayments && Array.isArray(data.quarterlyTaxPayments)) saveQuarterlyTaxPayments(data.quarterlyTaxPayments);
+        if (data.calendarPeople && Array.isArray(data.calendarPeople)) localStorage.setItem('psva_calendar_people', JSON.stringify(data.calendarPeople));
+        if (data.calShowHolidays != null) localStorage.setItem('psva_cal_show_holidays', data.calShowHolidays);
+        if (data.calShowUpcoming != null) localStorage.setItem('psva_cal_show_upcoming', data.calShowUpcoming);
+        if (data.quoteTermsTemplate) localStorage.setItem('psva_quote_terms_template', data.quoteTermsTemplate);
+        if (data.custNotesHeight) localStorage.setItem('psva_custNotesHeight', data.custNotesHeight);
+        if (data.taxPkgNotesHeight) localStorage.setItem('psva_taxPkgNotesHeight', data.taxPkgNotesHeight);
+        if (data.sidebarOrder) localStorage.setItem('psva_sidebar_order', data.sidebarOrder);
+        // Restore CPA notes
+        Object.keys(data).filter(k => k.startsWith('taxPkgNotes_')).forEach(k => localStorage.setItem('psva_' + k, data[k]));
+        if (data.theme) { isDarkMode = data.theme === 'dark'; document.body.classList.toggle('light-mode', !isDarkMode); localStorage.setItem('psva_theme', data.theme); }
+        if (data.pdfTheme) { selectedThemeId = data.pdfTheme; localStorage.setItem('psva_pdf_theme', data.pdfTheme); }
+        if (data.pdfDarkMode !== undefined) { pdfDarkMode = data.pdfDarkMode; localStorage.setItem('psva_pdf_dark_mode', String(pdfDarkMode)); }
+        if (data.customThemeColors) localStorage.setItem('psva_custom_theme_colors', JSON.stringify(data.customThemeColors));
+        updateSidebarLogo();
+        renderPage();
+        showToast('Data imported successfully!');
+      } catch(err) { showToast('Import failed: ' + err.message, 'error'); }
     };
     reader.readAsText(file);
   };
   input.click();
-}
-
-// Performs the actual data import after review
-function executeFullImport(data, scan, origVersion, migration, validation) {
-  if (data.company) saveCompany(data.company);
-  const types = ['jobs','estimates','quote','invoice','po','letterhead','timesheets','travel','receipts','pnl','inventory','equipment','testreports','workorder','changeorder','proposal','contracts','creditmemo','paymentreceipt','statements','certificates','assettransfers','safetyreports'];
-  const keys = ['jobs','estimates','quotes','invoices','po','letterheads','timesheets','travel','receipts','pnl','inventory','equipment','testReports','workorders','changeorders','proposals','contracts','creditmemos','paymentreceipts','statements','certificates','assettransfers','safetyreports'];
-
-  // Build a set of excluded record IDs from the review modal
-  const excludedIds = new Set();
-  if (scan && scan.groups) {
-    Object.values(scan.groups).forEach(group => {
-      group.records.forEach(record => {
-        if (!record.include) excludedIds.add(record.doc.id);
-      });
-    });
-  }
-
-  let importedCount = 0;
-  let skippedCount = 0;
-  types.forEach((t, i) => {
-    const arr = data[keys[i]];
-    if (arr && Array.isArray(arr)) {
-      const validDocs = [];
-      arr.forEach(doc => {
-        // Skip records the user unchecked in review
-        if (excludedIds.has(doc.id)) { skippedCount++; return; }
-        const result = validateDocument(doc, t);
-        if (result.valid) { validDocs.push(result.doc || doc); importedCount++; }
-        else { skippedCount++; }
-      });
-      localStorage.setItem('psva_' + t, JSON.stringify(validDocs));
-    }
-  });
-
-  // Restore additional data (with safe guards)
-  if (data.customers && Array.isArray(data.customers)) localStorage.setItem('psva_customers', JSON.stringify(data.customers));
-  if (data.technicians && Array.isArray(data.technicians)) localStorage.setItem('psva_technicians', JSON.stringify(data.technicians));
-  if (data.rateSheet) localStorage.setItem('psva_rate_sheet', JSON.stringify(data.rateSheet));
-  if (data.calendarEvents && Array.isArray(data.calendarEvents)) localStorage.setItem('psva_calendar_events', JSON.stringify(data.calendarEvents));
-  if (data.contractors1099 && Array.isArray(data.contractors1099)) save1099Contractors(data.contractors1099);
-  if (data.quarterlyTaxPayments && Array.isArray(data.quarterlyTaxPayments)) saveQuarterlyTaxPayments(data.quarterlyTaxPayments);
-  if (data.calendarPeople && Array.isArray(data.calendarPeople)) localStorage.setItem('psva_calendar_people', JSON.stringify(data.calendarPeople));
-  if (data.calShowHolidays != null) localStorage.setItem('psva_cal_show_holidays', data.calShowHolidays);
-  if (data.calShowUpcoming != null) localStorage.setItem('psva_cal_show_upcoming', data.calShowUpcoming);
-  if (data.quoteTermsTemplate) localStorage.setItem('psva_quote_terms_template', data.quoteTermsTemplate);
-  if (data.custNotesHeight) localStorage.setItem('psva_custNotesHeight', data.custNotesHeight);
-  if (data.taxPkgNotesHeight) localStorage.setItem('psva_taxPkgNotesHeight', data.taxPkgNotesHeight);
-  if (data.sidebarOrder) localStorage.setItem('psva_sidebar_order', data.sidebarOrder);
-  Object.keys(data).filter(k => k.startsWith('taxPkgNotes_')).forEach(k => localStorage.setItem('psva_' + k, data[k]));
-  if (data.theme) { isDarkMode = data.theme === 'dark'; document.body.classList.toggle('light-mode', !isDarkMode); localStorage.setItem('psva_theme', data.theme); }
-  if (data.pdfTheme) { selectedThemeId = data.pdfTheme; localStorage.setItem('psva_pdf_theme', data.pdfTheme); }
-  if (data.pdfDarkMode !== undefined) { pdfDarkMode = data.pdfDarkMode; localStorage.setItem('psva_pdf_dark_mode', String(pdfDarkMode)); }
-  if (data.customThemeColors) localStorage.setItem('psva_custom_theme_colors', JSON.stringify(data.customThemeColors));
-  if (data.employeeTypes) saveEmployeeTypes(data.employeeTypes);
-  if (data.docClassifications) saveDocClassifications(data.docClassifications);
-  if (data.internalDocPassword) setInternalDocPassword(data.internalDocPassword);
-  if (data.showSkillDetail !== undefined) setShowSkillDetail(data.showSkillDetail);
-  updateSidebarLogo();
-  renderPage();
-
-  // Show import summary
-  let msg = `Import complete! ${importedCount} record(s) imported.`;
-  if (skippedCount > 0) msg += ` ${skippedCount} record(s) skipped.`;
-  if (origVersion < CURRENT_DATA_VERSION) msg += ` Migrated from v${origVersion} → v${CURRENT_DATA_VERSION}.`;
-  if (origVersion > CURRENT_DATA_VERSION) msg += ` Note: File is from v${origVersion} (newer than v${CURRENT_DATA_VERSION}).`;
-  showToast(msg, skippedCount > 0 ? 'warning' : 'success');
-
-  if (migration && migration.log.length > 0) console.log('[PS-VA Import] Migration log:', migration.log);
-  if (validation && validation.issues.length > 0) console.log('[PS-VA Import] Validation notes:', validation.issues);
 }
 
 // ============================================================
@@ -10431,7 +8964,7 @@ function renderCalendarView() {
     '<h2 style="text-align:center;margin-bottom:16px;">' + monthNames[month] + ' ' + year + '</h2>' +
     '<p style="text-align:center;font-size:12px;color:var(--text-secondary);margin-top:-12px;margin-bottom:12px;">Click any date to add an event. Click custom events to edit them. Auto-generated events (jobs, calibrations, certs) are read-only.</p>' +
     calHtml +
-    '<div style="display:flex;gap:16px;align-items:center;margin-top:16px;padding:12px 16px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);flex-wrap:wrap;">' +
+    '<div style="display:flex;gap:16px;align-items:center;margin-top:16px;padding:12px 16px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);">' +
       '<span style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-right:8px;">Display Options:</span>' +
       '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">' +
         '<input type="checkbox" ' + (showHolidays ? 'checked' : '') + ' onchange="localStorage.setItem(\'psva_cal_show_holidays\', this.checked); renderCalendarView();" style="accent-color:#D97706;">' +
@@ -10441,15 +8974,6 @@ function renderCalendarView() {
         '<input type="checkbox" ' + (showUpcoming ? 'checked' : '') + ' onchange="localStorage.setItem(\'psva_cal_show_upcoming\', this.checked); renderCalendarView();" style="accent-color:#3B82F6;">' +
         '<span>Upcoming Events</span>' +
       '</label>' +
-      (function() {
-        var people = JSON.parse(localStorage.getItem('psva_calendar_people') || '[]');
-        if (people.length === 0) return '';
-        var filterPerson = localStorage.getItem('psva_cal_filter_person') || 'all';
-        return '<select class="form-select" style="width:160px;margin-left:auto;" onchange="localStorage.setItem(\'psva_cal_filter_person\',this.value); renderCalendarView();">' +
-          '<option value="all">All People</option>' +
-          people.map(function(p) { return '<option value="' + p + '"' + (filterPerson === p ? ' selected' : '') + '>' + p + '</option>'; }).join('') +
-        '</select>';
-      })() +
     '</div>' +
     upcomingHtml;
 }
@@ -10740,27 +9264,6 @@ function renderKPIDashboard() {
         </table>
       </div>
     </div>` : ''}
-
-    <!-- Employee KPIs -->
-    ${(() => {
-      const empKPIs = getEmployeeKPIs();
-      if (empKPIs.length === 0) return '';
-      return `
-      <div class="card">
-        <div class="card-title"><div class="accent-bar"></div>Employee Performance</div>
-        <div class="table-scroll">
-          <table class="data-table">
-            <thead><tr><th>Employee</th><th>Type</th><th style="text-align:right;">Hours</th><th style="text-align:right;">Travel</th><th style="text-align:right;">Cost</th><th style="text-align:right;">Utilization</th><th style="text-align:right;">Entries</th></tr></thead>
-            <tbody>
-              ${empKPIs.map(e => {
-                const typeBadge = e.empTypeInfo ? '<span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:' + e.empTypeInfo.color + '20;color:' + e.empTypeInfo.color + ';">' + escapeHtml(e.empTypeInfo.name) + '</span>' : '\u2014';
-                return '<tr><td>' + escapeHtml(e.name) + '</td><td>' + typeBadge + '</td><td style="text-align:right;">' + e.totalHours.toFixed(1) + '</td><td style="text-align:right;">' + e.totalTravel.toFixed(1) + '</td><td style="text-align:right;">' + formatCurrency(e.totalCost) + '</td><td style="text-align:right;">' + e.utilization.toFixed(0) + '%</td><td style="text-align:right;">' + e.entryCount + '</td></tr>';
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>`;
-    })()}
   `;
 }
 
@@ -14947,457 +13450,6 @@ async function exportYearEndTaxPackagePDF() {
 
   doc.save(`${(company.name || 'PS-VA').replace(/[^a-zA-Z0-9]/g, '_')}_Tax_Package_${year}.pdf`);
   showToast(`Year-End Tax Package exported for ${year}!`, 'success');
-}
-
-
-// ============================================================
-// BULK TIMESHEET ENTRY
-// ============================================================
-function showBulkTimesheetEntry() {
-  const main = document.querySelector('.main-content');
-  const jobs = getJobs();
-  const empTypes = getEmployeeTypes();
-  const company = getCompany();
-  if (!window._bulkTimesheets) {
-    window._bulkTimesheets = [{
-      employeeName: '', employeeType: '', jobId: '', date: todayStr(),
-      hoursRegular: 0, hoursOvertime: 0, hoursTravel: 0,
-      rateRegular: company.regularRate, rateOvertime: company.overtimeRate, rateTravel: company.travelRate,
-      description: ''
-    }];
-  }
-  main.innerHTML = `
-    <div class="page-header">
-      <div style="display:flex;align-items:center;gap:12px;">
-        <button class="btn-icon" onclick="showPage('timesheets')" title="Back">\u2190</button>
-        <h1>Bulk Timesheet Entry</h1>
-      </div>
-      <div class="page-header-actions">
-        <button class="btn btn-secondary" onclick="addBulkTimesheetRow()">+ Add Row</button>
-        <button class="btn btn-primary" onclick="saveBulkTimesheets()">Save All Entries</button>
-      </div>
-    </div>
-    <div class="card">
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Enter multiple timesheet entries at once. Each row creates a separate timesheet entry.</p>
-      <div class="table-scroll">
-        <table class="line-items-table">
-          <thead><tr>
-            <th>Employee</th><th>Type</th><th>Job</th><th>Date</th>
-            <th>Reg Hrs</th><th>OT Hrs</th><th>Travel</th><th>Description</th><th></th>
-          </tr></thead>
-          <tbody id="bulk-ts-body"></tbody>
-        </table>
-      </div>
-    </div>
-  `;
-  renderBulkTimesheetRows();
-}
-
-function renderBulkTimesheetRows() {
-  const tbody = document.getElementById('bulk-ts-body');
-  if (!tbody) return;
-  const jobs = getJobs();
-  const empTypes = getEmployeeTypes();
-  tbody.innerHTML = window._bulkTimesheets.map((row, i) => `
-    <tr>
-      <td><input class="form-input" value="${escapeHtml(row.employeeName)}" placeholder="Name" onchange="window._bulkTimesheets[${i}].employeeName=this.value;"></td>
-      <td><select class="form-select" onchange="window._bulkTimesheets[${i}].employeeType=this.value; applyBulkEmpTypeRate(${i});">
-        <option value="">\u2014</option>
-        ${empTypes.map(t => '<option value="' + t.id + '"' + (row.employeeType === t.id ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>').join('')}
-      </select></td>
-      <td><select class="form-select" onchange="window._bulkTimesheets[${i}].jobId=this.value;">
-        <option value="">\u2014</option>
-        ${jobs.map(j => '<option value="' + j.id + '"' + (row.jobId === j.id ? ' selected' : '') + '>' + escapeHtml(j.jobNumber) + '</option>').join('')}
-      </select></td>
-      <td><input class="form-input" type="date" value="${row.date}" onchange="window._bulkTimesheets[${i}].date=this.value;"></td>
-      <td><input class="form-input" type="number" value="${row.hoursRegular}" min="0" step="0.25" style="width:70px;" onchange="window._bulkTimesheets[${i}].hoursRegular=parseFloat(this.value)||0;"></td>
-      <td><input class="form-input" type="number" value="${row.hoursOvertime}" min="0" step="0.25" style="width:70px;" onchange="window._bulkTimesheets[${i}].hoursOvertime=parseFloat(this.value)||0;"></td>
-      <td><input class="form-input" type="number" value="${row.hoursTravel}" min="0" step="0.25" style="width:70px;" onchange="window._bulkTimesheets[${i}].hoursTravel=parseFloat(this.value)||0;"></td>
-      <td><input class="form-input" value="${escapeHtml(row.description)}" placeholder="Work done" onchange="window._bulkTimesheets[${i}].description=this.value;"></td>
-      <td><button class="delete-btn" onclick="window._bulkTimesheets.splice(${i},1); renderBulkTimesheetRows();">\u2715</button></td>
-    </tr>
-  `).join('');
-}
-
-function applyBulkEmpTypeRate(idx) {
-  const row = window._bulkTimesheets[idx];
-  if (!row || !row.employeeType) return;
-  const empType = getEmployeeTypeById(row.employeeType);
-  if (!empType) return;
-  const rs = getRateSheet();
-  const otRate = (rs.laborRates.find(r => r.id === 'overtime') || {}).rate || 225;
-  const travelRate = (rs.laborRates.find(r => r.id === 'travel') || {}).rate || 150;
-  const straightRate = (rs.laborRates.find(r => r.id === 'straight') || {}).rate || 150;
-  const ratio = empType.defaultRate / straightRate;
-  row.rateRegular = empType.defaultRate;
-  row.rateOvertime = Math.round(otRate * ratio * 100) / 100;
-  row.rateTravel = Math.round(travelRate * ratio * 100) / 100;
-}
-
-function addBulkTimesheetRow() {
-  const company = getCompany();
-  const lastRow = window._bulkTimesheets[window._bulkTimesheets.length - 1];
-  window._bulkTimesheets.push({
-    employeeName: lastRow ? lastRow.employeeName : '',
-    employeeType: lastRow ? lastRow.employeeType : '',
-    jobId: lastRow ? lastRow.jobId : '',
-    date: lastRow ? lastRow.date : todayStr(),
-    hoursRegular: 0, hoursOvertime: 0, hoursTravel: 0,
-    rateRegular: lastRow ? lastRow.rateRegular : company.regularRate,
-    rateOvertime: lastRow ? lastRow.rateOvertime : company.overtimeRate,
-    rateTravel: lastRow ? lastRow.rateTravel : company.travelRate,
-    description: ''
-  });
-  renderBulkTimesheetRows();
-}
-
-function saveBulkTimesheets() {
-  let count = 0;
-  window._bulkTimesheets.forEach(row => {
-    if (!row.employeeName && !row.hoursRegular && !row.hoursOvertime) return;
-    const ts = {
-      id: generateId(), jobId: row.jobId || '', date: row.date || todayStr(),
-      employeeName: row.employeeName, employeeType: row.employeeType || '',
-      description: row.description,
-      hoursRegular: row.hoursRegular || 0, hoursOvertime: row.hoursOvertime || 0, hoursTravel: row.hoursTravel || 0,
-      rateRegular: row.rateRegular || 0, rateOvertime: row.rateOvertime || 0, rateTravel: row.rateTravel || 0,
-      totalCost: (row.hoursRegular * row.rateRegular) + (row.hoursOvertime * row.rateOvertime) + (row.hoursTravel * row.rateTravel),
-      notes: '',
-    };
-    saveDocument('timesheets', ts);
-    count++;
-  });
-  window._bulkTimesheets = null;
-  showToast(count + ' timesheet entries saved!', 'success');
-  showPage('timesheets');
-}
-
-// ============================================================
-// EMPLOYEE HR PAGE
-// ============================================================
-function renderEmployeeHR() {
-  const main = document.querySelector('.main-content');
-  const timesheets = getTimesheets();
-  const empTypes = getEmployeeTypes();
-  const techs = getTechnicians();
-
-  // Get unique employee names from timesheets
-  const employeeNames = [...new Set(timesheets.map(t => t.employeeName).filter(Boolean))];
-
-  // Calculate per-employee stats
-  const empStats = employeeNames.map(name => {
-    const entries = timesheets.filter(t => t.employeeName === name);
-    const totalHours = entries.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
-    const totalTravel = entries.reduce((s, t) => s + (t.hoursTravel || 0), 0);
-    const totalCost = entries.reduce((s, t) => s + (t.totalCost || 0), 0);
-    const entryCount = entries.length;
-    const lastEntry = entries.sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
-    const empType = entries.find(e => e.employeeType)?.employeeType || '';
-    const empTypeInfo = empType ? empTypes.find(t => t.id === empType) : null;
-
-    // Check for missing entries (gaps > 2 days in last 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const recentDates = entries.filter(e => new Date(e.date) >= thirtyDaysAgo).map(e => e.date).sort();
-    let missingDays = 0;
-    if (recentDates.length > 0) {
-      const start = new Date(recentDates[0]);
-      const end = new Date();
-      const dateSet = new Set(recentDates);
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const day = d.getDay();
-        if (day !== 0 && day !== 6) { // weekdays only
-          const ds = d.toISOString().split('T')[0];
-          if (!dateSet.has(ds)) missingDays++;
-        }
-      }
-    }
-
-    return { name, totalHours, totalTravel, totalCost, entryCount, lastEntry, empType, empTypeInfo, missingDays };
-  });
-
-  // Sort by total hours descending
-  empStats.sort((a, b) => b.totalHours - a.totalHours);
-
-  // Dismissed missing entries
-  const dismissed = JSON.parse(localStorage.getItem('psva_hr_dismissed') || '[]');
-
-  main.innerHTML = `
-    <div class="page-header">
-      <h1>Employee HR Dashboard</h1>
-    </div>
-
-    ${empStats.filter(e => e.missingDays > 3 && !dismissed.includes(e.name)).length > 0 ? `
-    <div class="card" style="border:1px solid #F59E0B40;background:#F59E0B10;margin-bottom:16px;">
-      <div class="card-title" style="color:#F59E0B;"><div class="accent-bar" style="background:#F59E0B;"></div>Missing Time Entry Alerts</div>
-      ${empStats.filter(e => e.missingDays > 3 && !dismissed.includes(e.name)).map(e => `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-color);">
-          <div>
-            <strong>${escapeHtml(e.name)}</strong> \u2014 ${e.missingDays} weekday(s) without entries in last 30 days
-            ${e.lastEntry ? '<span style="font-size:12px;color:var(--text-secondary);"> (last entry: ' + formatDateShort(e.lastEntry.date) + ')</span>' : ''}
-          </div>
-          <button class="btn btn-secondary btn-sm" onclick="dismissMissingEntry('${escapeHtml(e.name)}')">Acknowledge</button>
-        </div>
-      `).join('')}
-    </div>` : ''}
-
-    <div class="card">
-      <div class="card-title"><div class="accent-bar"></div>Employee Summary</div>
-      ${empStats.length === 0 ? '<p class="intro-text">No employee data found. Create timesheet entries to populate this dashboard.</p>' : ''}
-      ${empStats.map(e => {
-        const typeBadge = e.empTypeInfo ? '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:' + e.empTypeInfo.color + '20;color:' + e.empTypeInfo.color + ';margin-left:8px;">' + escapeHtml(e.empTypeInfo.name) + '</span>' : '';
-        return `
-        <div class="doc-row" onclick="showEmployeeDetail('${escapeHtml(e.name)}')">
-          <div class="doc-row-info">
-            <div class="doc-row-number">${escapeHtml(e.name)} ${typeBadge}</div>
-            <div class="doc-row-meta">${e.entryCount} entries \u00b7 Last: ${e.lastEntry ? formatDateShort(e.lastEntry.date) : 'N/A'}</div>
-          </div>
-          <div class="doc-row-actions">
-            <div style="text-align:right;">
-              <div style="font-weight:600;">${e.totalHours.toFixed(1)} hrs</div>
-              <div style="font-size:12px;color:var(--text-secondary);">${formatCurrency(e.totalCost)}</div>
-            </div>
-          </div>
-        </div>`;
-      }).join('')}
-    </div>
-  `;
-}
-
-function dismissMissingEntry(name) {
-  const dismissed = JSON.parse(localStorage.getItem('psva_hr_dismissed') || '[]');
-  if (!dismissed.includes(name)) dismissed.push(name);
-  localStorage.setItem('psva_hr_dismissed', JSON.stringify(dismissed));
-  renderEmployeeHR();
-  showToast('Alert dismissed for ' + name);
-}
-
-function showEmployeeDetail(name) {
-  const main = document.querySelector('.main-content');
-  const timesheets = getTimesheets().filter(t => t.employeeName === name);
-  const jobs = getJobs();
-  const empTypes = getEmployeeTypes();
-
-  const totalHours = timesheets.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
-  const totalTravel = timesheets.reduce((s, t) => s + (t.hoursTravel || 0), 0);
-  const totalCost = timesheets.reduce((s, t) => s + (t.totalCost || 0), 0);
-  const avgHoursPerEntry = timesheets.length > 0 ? totalHours / timesheets.length : 0;
-
-  // Monthly breakdown
-  const monthlyData = {};
-  timesheets.forEach(t => {
-    const key = (t.date || '').substring(0, 7);
-    if (!monthlyData[key]) monthlyData[key] = { hours: 0, cost: 0, entries: 0 };
-    monthlyData[key].hours += (t.hoursRegular || 0) + (t.hoursOvertime || 0);
-    monthlyData[key].cost += t.totalCost || 0;
-    monthlyData[key].entries++;
-  });
-  const months = Object.keys(monthlyData).sort().reverse().slice(0, 12);
-
-  // Job breakdown
-  const jobData = {};
-  timesheets.forEach(t => {
-    const jid = t.jobId || 'unassigned';
-    if (!jobData[jid]) jobData[jid] = { hours: 0, cost: 0 };
-    jobData[jid].hours += (t.hoursRegular || 0) + (t.hoursOvertime || 0);
-    jobData[jid].cost += t.totalCost || 0;
-  });
-
-  main.innerHTML = `
-    <div class="page-header">
-      <div style="display:flex;align-items:center;gap:12px;">
-        <button class="btn-icon" onclick="showPage('employee-hr')" title="Back">\u2190</button>
-        <h1>${escapeHtml(name)}</h1>
-      </div>
-    </div>
-    <div class="dashboard-stats">
-      <div class="stat-card"><div class="stat-label">Total Hours</div><div class="stat-value">${totalHours.toFixed(1)}</div></div>
-      <div class="stat-card"><div class="stat-label">Travel Hours</div><div class="stat-value">${totalTravel.toFixed(1)}</div></div>
-      <div class="stat-card"><div class="stat-label">Total Cost</div><div class="stat-value">${formatCurrency(totalCost)}</div></div>
-      <div class="stat-card"><div class="stat-label">Avg Hrs/Entry</div><div class="stat-value">${avgHoursPerEntry.toFixed(1)}</div></div>
-      <div class="stat-card"><div class="stat-label">Total Entries</div><div class="stat-value">${timesheets.length}</div></div>
-    </div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-      <div class="card">
-        <div class="card-title"><div class="accent-bar"></div>Monthly Breakdown</div>
-        <table style="width:100%;font-size:13px;">
-          <thead><tr><th style="text-align:left;">Month</th><th style="text-align:right;">Hours</th><th style="text-align:right;">Cost</th><th style="text-align:right;">Entries</th></tr></thead>
-          <tbody>
-            ${months.map(m => `<tr><td>${m}</td><td style="text-align:right;">${monthlyData[m].hours.toFixed(1)}</td><td style="text-align:right;">${formatCurrency(monthlyData[m].cost)}</td><td style="text-align:right;">${monthlyData[m].entries}</td></tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-      <div class="card">
-        <div class="card-title"><div class="accent-bar"></div>Job Breakdown</div>
-        <table style="width:100%;font-size:13px;">
-          <thead><tr><th style="text-align:left;">Job</th><th style="text-align:right;">Hours</th><th style="text-align:right;">Cost</th></tr></thead>
-          <tbody>
-            ${Object.entries(jobData).sort((a, b) => b[1].hours - a[1].hours).map(([jid, d]) => {
-              const job = jid !== 'unassigned' ? jobs.find(j => j.id === jid) : null;
-              return `<tr><td>${job ? escapeHtml(job.jobNumber + ' \u2014 ' + job.name) : 'Unassigned'}</td><td style="text-align:right;">${d.hours.toFixed(1)}</td><td style="text-align:right;">${formatCurrency(d.cost)}</td></tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title"><div class="accent-bar"></div>Recent Entries</div>
-      ${timesheets.sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 20).map(t => {
-        const job = jobs.find(j => j.id === t.jobId);
-        const hrs = (t.hoursRegular || 0) + (t.hoursOvertime || 0) + (t.hoursTravel || 0);
-        return `<div class="doc-row" onclick="editTimesheet('${t.id}')">
-          <div class="doc-row-info">
-            <div class="doc-row-number">${formatDateShort(t.date)}</div>
-            <div class="doc-row-meta">${job ? escapeHtml(job.jobNumber) : 'No job'} \u00b7 ${escapeHtml(t.description || '')} \u00b7 ${hrs.toFixed(1)}h</div>
-          </div>
-          <div class="doc-row-actions"><span class="doc-row-total">${formatCurrency(t.totalCost)}</span></div>
-        </div>`;
-      }).join('')}
-    </div>
-  `;
-}
-
-// ============================================================
-// JOB PACKAGE PDF EXPORT
-// ============================================================
-function exportJobPackagePDF(jobId) {
-  const job = getJobById(jobId);
-  if (!job) { showToast('Job not found', 'error'); return; }
-  const company = getCompany();
-  const theme = getActiveTheme();
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF('p', 'mm', 'letter');
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const ml = 15, mr = 15;
-
-  function hexToRgbLocal(hex) {
-    hex = hex.replace('#', '');
-    return [parseInt(hex.substring(0,2),16), parseInt(hex.substring(2,4),16), parseInt(hex.substring(4,6),16)];
-  }
-
-  let y = pdfAddHeader(doc, theme, company, 'JOB PACKAGE', job.jobNumber + ' \u2014 ' + (job.name || ''), pageWidth);
-  y += 5;
-
-  // Job Info
-  doc.setFontSize(9); doc.setTextColor(80);
-  doc.text('Customer: ' + (job.customer?.name || '') + ' \u2014 ' + (job.customer?.company || ''), ml, y); y += 4;
-  doc.text('Status: ' + (job.status || ''), ml, y); y += 4;
-  doc.text('Start: ' + (job.startDate || 'N/A') + '  |  End: ' + (job.endDate || 'N/A'), ml, y); y += 8;
-
-  // Estimates
-  const estimates = getEstimates().filter(e => e.jobId === jobId);
-  if (estimates.length > 0) {
-    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...hexToRgbLocal(theme.colors.accent));
-    doc.text('ESTIMATES (' + estimates.length + ')', ml, y); y += 6;
-    doc.autoTable({
-      startY: y, margin: { left: ml, right: mr },
-      head: [['#', 'Description', 'Total Cost', 'Customer Price']],
-      body: estimates.map(e => [e.estimateNumber || '', e.projectName || '', formatCurrency(e.totalCost || 0), formatCurrency(e.totalCustomerPrice || 0)]),
-      styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: hexToRgbLocal(theme.colors.accent), textColor: [255,255,255] },
-    });
-    y = doc.lastAutoTable.finalY + 8;
-  }
-
-  // Quotes
-  const quotes = getDocuments('quote').filter(q => q.jobId === jobId);
-  if (quotes.length > 0) {
-    if (y > pageHeight - 50) { doc.addPage(); y = 20; }
-    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...hexToRgbLocal(theme.colors.accent));
-    doc.text('QUOTES (' + quotes.length + ')', ml, y); y += 6;
-    doc.autoTable({
-      startY: y, margin: { left: ml, right: mr },
-      head: [['#', 'Customer', 'Date', 'Status', 'Total']],
-      body: quotes.map(q => [q.docNumber || '', q.customerName || '', q.date || '', q.status || 'draft', formatCurrency(q.total || 0)]),
-      styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: hexToRgbLocal(theme.colors.accent), textColor: [255,255,255] },
-    });
-    y = doc.lastAutoTable.finalY + 8;
-  }
-
-  // Invoices
-  const invoices = getDocuments('invoice').filter(i => i.jobId === jobId);
-  if (invoices.length > 0) {
-    if (y > pageHeight - 50) { doc.addPage(); y = 20; }
-    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...hexToRgbLocal(theme.colors.accent));
-    doc.text('INVOICES (' + invoices.length + ')', ml, y); y += 6;
-    doc.autoTable({
-      startY: y, margin: { left: ml, right: mr },
-      head: [['#', 'Customer', 'Date', 'Status', 'Total']],
-      body: invoices.map(inv => [inv.docNumber || '', inv.customerName || '', inv.date || '', inv.status || 'draft', formatCurrency(inv.total || 0)]),
-      styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: hexToRgbLocal(theme.colors.accent), textColor: [255,255,255] },
-    });
-    y = doc.lastAutoTable.finalY + 8;
-  }
-
-  // Timesheets
-  const timesheets = getTimesheets().filter(t => t.jobId === jobId);
-  if (timesheets.length > 0) {
-    if (y > pageHeight - 50) { doc.addPage(); y = 20; }
-    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...hexToRgbLocal(theme.colors.accent));
-    doc.text('TIMESHEETS (' + timesheets.length + ')', ml, y); y += 6;
-    const totalHrs = timesheets.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
-    const totalCost = timesheets.reduce((s, t) => s + (t.totalCost || 0), 0);
-    doc.autoTable({
-      startY: y, margin: { left: ml, right: mr },
-      head: [['Employee', 'Date', 'Reg Hrs', 'OT Hrs', 'Travel', 'Cost']],
-      body: timesheets.map(t => [t.employeeName || '', t.date || '', (t.hoursRegular||0).toFixed(1), (t.hoursOvertime||0).toFixed(1), (t.hoursTravel||0).toFixed(1), formatCurrency(t.totalCost||0)]),
-      foot: [['Total', '', '', '', '', formatCurrency(totalCost)]],
-      styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: hexToRgbLocal(theme.colors.accent), textColor: [255,255,255] },
-      footStyles: { fillColor: [240,240,240], fontStyle: 'bold' },
-    });
-    y = doc.lastAutoTable.finalY + 8;
-  }
-
-  // Receipts
-  const receipts = getReceipts().filter(r => r.jobId === jobId);
-  if (receipts.length > 0) {
-    if (y > pageHeight - 50) { doc.addPage(); y = 20; }
-    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...hexToRgbLocal(theme.colors.accent));
-    doc.text('RECEIPTS (' + receipts.length + ')', ml, y); y += 6;
-    doc.autoTable({
-      startY: y, margin: { left: ml, right: mr },
-      head: [['Vendor', 'Date', 'Description', 'Amount']],
-      body: receipts.map(r => [r.vendor || '', r.date || '', r.description || '', formatCurrency(r.amount || 0)]),
-      styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: hexToRgbLocal(theme.colors.accent), textColor: [255,255,255] },
-    });
-    y = doc.lastAutoTable.finalY + 8;
-  }
-
-  // Page numbers
-  const totalPages = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
-    doc.setFontSize(7); doc.setTextColor(120);
-    doc.text(company.name + ' | ' + job.jobNumber + ' \u2014 Job Package', ml, pageHeight - 8);
-    doc.text('Page ' + i + ' of ' + totalPages, pageWidth - mr, pageHeight - 8, { align: 'right' });
-  }
-
-  doc.save(job.jobNumber + '-Job-Package.pdf');
-  showToast('Job Package PDF exported!');
-}
-
-// ============================================================
-// PER-EMPLOYEE KPI METRICS IN KPI DASHBOARD
-// ============================================================
-function getEmployeeKPIs() {
-  const timesheets = getTimesheets();
-  const empTypes = getEmployeeTypes();
-  const employeeNames = [...new Set(timesheets.map(t => t.employeeName).filter(Boolean))];
-
-  return employeeNames.map(name => {
-    const entries = timesheets.filter(t => t.employeeName === name);
-    const totalHours = entries.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
-    const totalTravel = entries.reduce((s, t) => s + (t.hoursTravel || 0), 0);
-    const totalCost = entries.reduce((s, t) => s + (t.totalCost || 0), 0);
-    const billableHours = entries.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
-    const totalAvailable = entries.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0) + (t.hoursTravel || 0), 0);
-    const utilization = totalAvailable > 0 ? (billableHours / totalAvailable * 100) : 0;
-    const empType = entries.find(e => e.employeeType)?.employeeType || '';
-    const empTypeInfo = empType ? empTypes.find(t => t.id === empType) : null;
-    return { name, totalHours, totalTravel, totalCost, utilization, entryCount: entries.length, empTypeInfo };
-  }).sort((a, b) => b.totalHours - a.totalHours);
 }
 
 

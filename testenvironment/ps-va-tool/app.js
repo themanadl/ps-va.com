@@ -1126,7 +1126,6 @@ function editEstimate(estId) {
 
 function renderEstimateEditor(est) {
   window._currentEstimate = est;
-  if (!est.lineItems) est.lineItems = [];
   window._estLineItems = est.lineItems.map(li => ({...li}));
   const main = document.querySelector('.main-content');
   const job = est.jobId ? getJobById(est.jobId) : null;
@@ -1532,18 +1531,14 @@ function updateDocListPref(type, key, value) {
   const prefs = getDashboardPrefs(type);
   prefs[key] = value;
   saveDashboardPrefs(type, prefs);
-  if (type === 'jobs') { renderJobsList(); }
-  else if (type === 'timesheets') { renderTimesheetsList(); }
-  else { renderDocumentList(type); }
+  renderDocumentList(type);
 }
 
 function toggleDocListSortDir(type) {
   const prefs = getDashboardPrefs(type);
   prefs.sortDir = prefs.sortDir === 'asc' ? 'desc' : 'asc';
   saveDashboardPrefs(type, prefs);
-  if (type === 'jobs') { renderJobsList(); }
-  else if (type === 'timesheets') { renderTimesheetsList(); }
-  else { renderDocumentList(type); }
+  renderDocumentList(type);
 }
 
 function createNewDocument(type) {
@@ -5558,8 +5553,7 @@ function validateDocument(doc, type) {
 // IMPORT REVIEW MODAL
 // ============================================================
 // Scans import data and groups issues by job for interactive review
-function scanImportData(data, origVersion) {
-  origVersion = origVersion || data.version || CURRENT_DATA_VERSION;
+function scanImportData(data) {
   const jobs = data.jobs || [];
   const types = ['estimates','quotes','invoices','po','letterheads','timesheets','travel','receipts','pnl','inventory','equipment','testReports','workorders','changeorders','proposals','contracts','creditmemos','paymentreceipts','statements','certificates','assettransfers','safetyreports'];
   const storageTypes = ['estimates','quote','invoice','po','letterhead','timesheets','travel','receipts','pnl','inventory','equipment','testreports','workorder','changeorder','proposal','contracts','creditmemo','paymentreceipt','statements','certificates','assettransfers','safetyreports'];
@@ -5601,25 +5595,6 @@ function scanImportData(data, origVersion) {
     const sType = storageTypes[idx];
     arr.forEach(doc => {
       const result = validateDocument({...doc}, sType);
-      // Add migration-filled warnings for fields auto-populated during version migration
-      if (origVersion < 6 && ['quote', 'invoice'].includes(sType)) {
-        // Status was auto-filled to 'draft' during v5→v6 migration
-        const hasStatusIssue = result.issues.some(i => i.field === 'status');
-        if (!hasStatusIssue && doc.status === 'draft') {
-          result.issues.push({field: 'status', message: 'Auto-set to "draft" during migration from v' + origVersion + ' — verify correct status', defaultValue: 'draft', severity: 'warning', editable: true, inputType: 'select', options: sType === 'quote' ? ['draft','in_review','sent','accepted','rejected','expired'] : ['draft','sent','paid','overdue','void']});
-        }
-      }
-      if (origVersion < 6 && sType === 'timesheets') {
-        // employeeType was auto-filled to '' during v5→v6 migration
-        const hasEmpTypeIssue = result.issues.some(i => i.field === 'employeeType');
-        if (!hasEmpTypeIssue && (!doc.employeeType || doc.employeeType === '')) {
-          result.issues.push({field: 'employeeType', message: 'Employee type not set — added in v6, please assign', defaultValue: '', severity: 'warning', editable: true, inputType: 'select', options: getEmployeeTypes().map(et => et.name)});
-        }
-        // Rate fields may be 0 from old data
-        if (!result.issues.some(i => i.field === 'rateRegular') && (doc.rateRegular === 0 || doc.rateRegular === undefined)) {
-          result.issues.push({field: 'rateRegular', message: 'Regular rate is $0.00 — verify billing rate', defaultValue: '0', severity: 'warning', editable: true, inputType: 'number'});
-        }
-      }
       if (!result.valid) {
         totalRecords++;
         totalIssues++;
@@ -5638,7 +5613,7 @@ function scanImportData(data, origVersion) {
 }
 
 function showImportReviewModal(data, origVersion, migration, onConfirm, onCancel) {
-  const scan = scanImportData(data, origVersion);
+  const scan = scanImportData(data);
 
   // If no issues at all, skip the modal
   if (!scan.hasIssues) {
