@@ -1,9 +1,9 @@
 // ============================================================
-// PS-VA DOCUMENT TOOL v6.0 - Complete Standalone Application
+// PS-VA DOCUMENT TOOL v6.2 - Complete Standalone Application
 // ============================================================
 
 // ===== VERSION & COMPATIBILITY =====
-const CURRENT_DATA_VERSION = 6;
+const CURRENT_DATA_VERSION = 7;
 const MIN_SUPPORTED_VERSION = 1;
 
 // ===== GLOBAL STATE =====
@@ -35,6 +35,114 @@ function saveEmployeeTypes(types) {
 
 function getEmployeeTypeById(id) {
   return getEmployeeTypes().find(t => t.id === id) || null;
+}
+
+// ===== EMPLOYEE ROSTER =====
+function getEmployeeRoster() {
+  const data = localStorage.getItem('psva_employee_roster');
+  return data ? JSON.parse(data) : [];
+}
+
+function saveEmployeeRoster(roster) {
+  localStorage.setItem('psva_employee_roster', JSON.stringify(roster));
+}
+
+function getDefaultEmployee() {
+  return {
+    id: generateId(),
+    name: '',
+    employeeType: '',
+    classification: 'W-2',  // W-2 or 1099
+    hireDate: '',
+    terminationDate: '',
+    // Contact
+    phone: '',          // work phone
+    personalPhone: '',  // personal phone
+    email: '',
+    // Address
+    address: '',
+    city: '',
+    state: '',
+    zip: '',
+    // Emergency
+    emergencyContact: '',
+    emergencyPhone: '',
+    // Sensitive / Legal
+    ssn: '',            // stored encrypted-style, displayed masked
+    // Compensation
+    payRate: 0,         // what the company pays the employee per hour
+    payType: 'hourly',  // hourly or salary
+    // Professional
+    certifications: [],  // structured certs: [{id, name, issuingBody, certNumber, issueDate, expirationDate, documentData, documentName}]
+    notes: '',
+    // Status
+    active: true,
+    // Technician sync
+    syncToTechnician: false,
+    linkedTechnicianId: '',
+    // Legal / Onboarding Documents
+    legalDocuments: [],
+    dateAdded: new Date().toISOString(),
+  };
+}
+
+const LEGAL_DOC_CATEGORIES = [
+  { id: 'tax', name: 'Tax Forms', templates: ['W-4 Federal Tax Withholding', 'W-9 Request for TIN', 'State Tax Withholding Form'] },
+  { id: 'eligibility', name: 'Employment Eligibility', templates: ['I-9 Employment Eligibility Verification', 'E-Verify Confirmation'] },
+  { id: 'agreements', name: 'Agreements', templates: ['Offer Letter', 'Employment Agreement', 'Non-Disclosure Agreement (NDA)', 'Non-Compete Agreement', 'At-Will Employment Acknowledgment'] },
+  { id: 'benefits', name: 'Benefits Enrollment', templates: ['Health Insurance Enrollment', '401(k) Enrollment', 'Life Insurance Enrollment', 'Benefits Waiver Form'] },
+  { id: 'payroll', name: 'Payroll', templates: ['Direct Deposit Authorization', 'Pay Rate Agreement'] },
+  { id: 'policies', name: 'Policy Acknowledgments', templates: ['Employee Handbook Acknowledgment', 'Safety Policy Acknowledgment', 'Drug-Free Workplace Policy', 'Acceptable Use Policy', 'Anti-Harassment Policy'] },
+  { id: 'identification', name: 'Identification', templates: ["Driver's License Copy", 'Professional License Copy', 'Social Security Card Copy'] },
+  { id: 'other', name: 'Other', templates: [] }
+];
+
+const LEGAL_DOC_STATUSES = [
+  { id: 'pending', name: 'Pending', color: '#f59e0b' },
+  { id: 'signed', name: 'Signed', color: '#22c55e' },
+  { id: 'received', name: 'Received', color: '#3b82f6' },
+  { id: 'expired', name: 'Expired', color: '#dc2626' },
+  { id: 'not_applicable', name: 'N/A', color: '#6b7280' }
+];
+
+function getEmployeeById(id) {
+  return getEmployeeRoster().find(e => e.id === id) || null;
+}
+
+function saveEmployee(emp) {
+  const roster = getEmployeeRoster();
+  const idx = roster.findIndex(e => e.id === emp.id);
+  if (idx >= 0) roster[idx] = emp;
+  else roster.push(emp);
+  saveEmployeeRoster(roster);
+}
+
+function deleteEmployee(id) {
+  const roster = getEmployeeRoster().filter(e => e.id !== id);
+  saveEmployeeRoster(roster);
+}
+
+function getEmployeeRosterNames() {
+  // Returns active employees for dropdown use
+  return getEmployeeRoster().filter(e => e.active).map(e => ({ id: e.id, name: e.name, employeeType: e.employeeType, classification: e.classification }));
+}
+
+/**
+ * Calculate the effective employee pay rate for a given hour type.
+ * The employee's base payRate (what they're paid for straight time) is multiplied
+ * by the same ratio that the billing rate uses. For example, if billing OT is 1.5x
+ * billing straight, then employee OT pay is 1.5x their base pay.
+ * This ensures internal cost calculations properly reflect OT, DT, holiday, etc.
+ */
+function getEmployeeEffectivePayRate(empPayRate, hourTypeId) {
+  if (!empPayRate || empPayRate <= 0) return 0;
+  if (!hourTypeId || hourTypeId === 'straight') return empPayRate;
+  const rs = getRateSheet();
+  const rateEntry = (rs.laborRates || []).find(r => r.id === hourTypeId);
+  if (!rateEntry) return empPayRate; // unknown type, use base
+  const multiplier = parseFloat(rateEntry.multiplier);
+  if (multiplier > 0) return empPayRate * multiplier;
+  return empPayRate; // fallback to base if multiplier is 0 or missing
 }
 
 // ===== DOCUMENT CLASSIFICATION SYSTEM =====
@@ -139,6 +247,74 @@ function getDashboardPrefs(pageId) {
 
 function saveDashboardPrefs(pageId, prefs) {
   localStorage.setItem('psva_dash_prefs_' + pageId, JSON.stringify(prefs));
+}
+
+// ===== UNCHECKED DATA HIGHLIGHTING SYSTEM =====
+// Tracks which fields were auto-populated (defaults, imports, system-generated)
+// and haven't been reviewed by the user yet. State persists in localStorage.
+function getUncheckedFields() {
+  const data = localStorage.getItem('psva_unchecked_fields');
+  return data ? JSON.parse(data) : {};
+}
+
+function saveUncheckedFields(fields) {
+  localStorage.setItem('psva_unchecked_fields', JSON.stringify(fields));
+}
+
+// Mark a specific field as unchecked (auto-populated)
+// key format: "docType:docId:fieldName" e.g. "timesheet:abc123:hourType"
+function markFieldUnchecked(key) {
+  const fields = getUncheckedFields();
+  fields[key] = { timestamp: new Date().toISOString(), source: 'auto' };
+  saveUncheckedFields(fields);
+}
+
+// Mark a field as checked (user has reviewed it)
+function markFieldChecked(key) {
+  const fields = getUncheckedFields();
+  delete fields[key];
+  saveUncheckedFields(fields);
+}
+
+// Check if a field is unchecked
+function isFieldUnchecked(key) {
+  const fields = getUncheckedFields();
+  return !!fields[key];
+}
+
+// Mark multiple fields as unchecked at once (e.g., during import)
+function markFieldsUnchecked(keys) {
+  const fields = getUncheckedFields();
+  const ts = new Date().toISOString();
+  keys.forEach(k => { fields[k] = { timestamp: ts, source: 'auto' }; });
+  saveUncheckedFields(fields);
+}
+
+// Clear all unchecked fields for a specific document
+function clearUncheckedForDoc(docType, docId) {
+  const fields = getUncheckedFields();
+  const prefix = docType + ':' + docId + ':';
+  Object.keys(fields).forEach(k => {
+    if (k.startsWith(prefix)) delete fields[k];
+  });
+  saveUncheckedFields(fields);
+}
+
+// Get count of unchecked fields for a document
+function getUncheckedCountForDoc(docType, docId) {
+  const fields = getUncheckedFields();
+  const prefix = docType + ':' + docId + ':';
+  return Object.keys(fields).filter(k => k.startsWith(prefix)).length;
+}
+
+// CSS class helper: returns a class string if the field is unchecked
+function uncheckedClass(key) {
+  return isFieldUnchecked(key) ? 'unchecked-field' : '';
+}
+
+// Inline style helper for unchecked indicator
+function uncheckedStyle(key) {
+  return isFieldUnchecked(key) ? 'border-left:3px solid #F59E0B;padding-left:6px;background:#F59E0B08;' : '';
 }
 
 // ===== QUOTE STATUSES =====
@@ -705,7 +881,7 @@ function renderJobDashboard() {
   const totalLabor = timesheets.reduce((s, t) => s + (t.totalCost || 0), 0);
   const totalTravel = travel.reduce((s, t) => s + (t.totalCost || 0), 0);
   const totalReceipts = receipts.reduce((s, r) => s + (r.amount || 0), 0);
-  const totalHours = timesheets.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0) + (t.hoursTravel || 0), 0);
+  const totalHours = timesheets.reduce((s, t) => s + getTimesheetTotalHours(t), 0);
   const totalMiles = travel.reduce((s, t) => s + (t.mileage || 0), 0);
 
   main.innerHTML = `
@@ -806,9 +982,9 @@ function renderJobDashboard() {
       ${timesheets.length === 0 ? '<p class="intro-text">No timesheet entries yet.</p>' :
         `<div class="mini-table">${timesheets.slice(-10).reverse().map(t => `
           <div class="mini-row" onclick="editTimesheet('${t.id}')">
-            <span class="mini-primary">${escapeHtml(t.employeeName)}</span>
-            <span class="mini-secondary">${formatDateShort(t.date)} · ${((t.hoursRegular||0)+(t.hoursOvertime||0)+(t.hoursTravel||0)).toFixed(1)}h</span>
-            <span class="mini-amount">${formatCurrency(t.totalCost)}</span>
+            <span class="mini-primary">${escapeHtml(getTimesheetTechnicians(t).join(', ') || t.employeeName || 'Unnamed')}</span>
+            <span class="mini-secondary">${formatDateShort(t.date)} · ${getTimesheetTotalHours(t).toFixed(1)}h</span>
+            <span class="mini-amount">${getTimesheetTotalHours(t).toFixed(1)} hrs</span>
           </div>`).join('')}</div>`
       }
     </div>
@@ -2529,15 +2705,79 @@ function saveCurrentLetterhead(){const doc=collectLetterheadData();saveDocument(
 // ============================================================
 // TIMESHEETS
 // ============================================================
+// ===== WORK REASON OPTIONS (for timesheet checkboxes) =====
+const WORK_REASONS = [
+  { id: 'planned', label: 'Planned Work' },
+  { id: 'extended', label: 'Extended Hours' },
+  { id: 'added_scope', label: 'Added Scope' },
+  { id: 'emergency', label: 'Emergency' },
+  { id: 'callback', label: 'Callback / Warranty' },
+  { id: 'inspection', label: 'Inspection / Testing' },
+];
+
+function getDefaultTimesheetRow() {
+  return {
+    rowId: generateId(),
+    technicianName: '',
+    hourType: 'straight',  // from rate sheet labor rates
+    hours: 0,
+    description: '',
+    workReasons: [],  // array of WORK_REASONS ids
+  };
+}
+
 function getDefaultTimesheet(jobId) {
-  const company = getCompany();
   return {
     id: generateId(), jobId: jobId || '', date: todayStr(),
+    dateEnd: '',  // optional end date for multi-day timesheets
+    poNumber: '', woNumber: '',  // tracking fields
+    foreman: '',
+    rows: [getDefaultTimesheetRow()],  // multi-row per-technician entries
+    notes: '',
+    // Legacy fields preserved for backward compatibility / migration
     employeeName: '', employeeType: '', description: '',
     hoursRegular: 0, hoursOvertime: 0, hoursTravel: 0,
-    rateRegular: company.regularRate, rateOvertime: company.overtimeRate, rateTravel: company.travelRate,
-    totalCost: 0, notes: '',
+    rateRegular: 0, rateOvertime: 0, rateTravel: 0,
+    totalCost: 0,
   };
+}
+
+// Migrate a legacy single-row timesheet to the new multi-row format
+function migrateTimesheetToMultiRow(ts) {
+  if (ts.rows && ts.rows.length > 0) return ts; // already migrated
+  const rows = [];
+  if (ts.employeeName || ts.hoursRegular || ts.hoursOvertime || ts.hoursTravel) {
+    if (ts.hoursRegular > 0) {
+      rows.push({ rowId: generateId(), technicianName: ts.employeeName || '', hourType: 'straight', hours: ts.hoursRegular, description: ts.description || '', workReasons: [] });
+    }
+    if (ts.hoursOvertime > 0) {
+      rows.push({ rowId: generateId(), technicianName: ts.employeeName || '', hourType: 'overtime', hours: ts.hoursOvertime, description: ts.description || '', workReasons: [] });
+    }
+    if (ts.hoursTravel > 0) {
+      rows.push({ rowId: generateId(), technicianName: ts.employeeName || '', hourType: 'travel', hours: ts.hoursTravel, description: ts.description || '', workReasons: [] });
+    }
+    if (rows.length === 0) {
+      rows.push({ rowId: generateId(), technicianName: ts.employeeName || '', hourType: 'straight', hours: 0, description: ts.description || '', workReasons: [] });
+    }
+  }
+  ts.rows = rows.length > 0 ? rows : [getDefaultTimesheetRow()];
+  return ts;
+}
+
+// Helper: get total hours from a timesheet (works with both old and new format)
+function getTimesheetTotalHours(ts) {
+  if (ts.rows && ts.rows.length > 0) {
+    return ts.rows.reduce((sum, r) => sum + (r.hours || 0), 0);
+  }
+  return (ts.hoursRegular || 0) + (ts.hoursOvertime || 0) + (ts.hoursTravel || 0);
+}
+
+// Helper: get all technician names from a timesheet
+function getTimesheetTechnicians(ts) {
+  if (ts.rows && ts.rows.length > 0) {
+    return [...new Set(ts.rows.map(r => r.technicianName).filter(Boolean))];
+  }
+  return ts.employeeName ? [ts.employeeName] : [];
 }
 
 function renderTimesheetsList() {
@@ -2571,7 +2811,7 @@ function renderTimesheetsList() {
     switch (prefs.sortBy) {
       case 'name': return (a.employeeName || '').localeCompare(b.employeeName || '') * sortDir;
       case 'total': return ((a.totalCost || 0) - (b.totalCost || 0)) * sortDir;
-      case 'hours': return (((a.hoursRegular||0)+(a.hoursOvertime||0)+(a.hoursTravel||0)) - ((b.hoursRegular||0)+(b.hoursOvertime||0)+(b.hoursTravel||0))) * sortDir;
+      case 'hours': return (getTimesheetTotalHours(a) - getTimesheetTotalHours(b)) * sortDir;
       default: return (a.date || '').localeCompare(b.date || '') * sortDir;
     }
   });
@@ -2583,7 +2823,7 @@ function renderTimesheetsList() {
     <div class="page-header">
       <h1>Timesheets</h1>
       <div class="page-header-actions">
-        <button class="btn btn-secondary" onclick="exportTimesheetPDF()">Print Blank Timesheet</button>
+        <button class="btn btn-secondary" onclick="exportTimesheetPDF()">Export Blank Timesheet</button>
         <button class="btn btn-secondary" onclick="showBulkTimesheetEntry()">Bulk Entry</button>
         <button class="btn btn-primary" onclick="createNewTimesheet()">+ New Entry</button>
       </div>
@@ -2611,17 +2851,18 @@ function renderTimesheetsList() {
     ${entries.length === 0 ? '<p class="intro-text">No timesheet entries found.</p>' : ''}
     ${entries.map(t => {
       const job = jobs.find(j => j.id === t.jobId);
-      const totalHrs = (t.hoursRegular||0) + (t.hoursOvertime||0) + (t.hoursTravel||0);
-      const empType = t.employeeType ? empTypes.find(et => et.id === t.employeeType) : null;
-      const typeBadge = empType ? '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:' + empType.color + '20;color:' + empType.color + ';margin-left:8px;">' + escapeHtml(empType.name) + '</span>' : '';
+      const totalHrs = getTimesheetTotalHours(t);
+      const techs = getTimesheetTechnicians(t);
+      const techLabel = techs.length > 0 ? techs.join(', ') : (t.employeeName || 'Unnamed');
+      const rowCount = (t.rows || []).length;
       return `
       <div class="doc-row" onclick="editTimesheet('${t.id}')">
         <div class="doc-row-info">
-          <div class="doc-row-number">${escapeHtml(t.employeeName || 'Unnamed')} \u2014 ${formatDateShort(t.date)} ${typeBadge}</div>
-          <div class="doc-row-meta">${job ? escapeHtml(job.jobNumber + ' \u2014 ' + job.name) : 'No job linked'} \u00b7 ${totalHrs.toFixed(1)}h</div>
+          <div class="doc-row-number">${escapeHtml(techLabel)} \u2014 ${formatDateShort(t.date)}${t.dateEnd ? ' to ' + formatDateShort(t.dateEnd) : ''}</div>
+          <div class="doc-row-meta">${job ? escapeHtml(job.jobNumber + ' \u2014 ' + job.name) : 'No job linked'} \u00b7 ${totalHrs.toFixed(1)}h${rowCount > 1 ? ' \u00b7 ' + rowCount + ' rows' : ''}</div>
         </div>
         <div class="doc-row-actions">
-          <span class="doc-row-total">${formatCurrency(t.totalCost)}</span>
+          <span class="doc-row-total" style="font-size:13px;font-weight:600;">${totalHrs.toFixed(1)} hrs</span>
           <button class="btn-icon" onclick="event.stopPropagation(); confirmDelete('timesheets','${t.id}','Timesheet')" title="Delete">\ud83d\uddd1</button>
         </div>
       </div>`;
@@ -2640,81 +2881,175 @@ function editTimesheet(id) {
 }
 
 function renderTimesheetEditor(ts) {
+  // Ensure multi-row format
+  migrateTimesheetToMultiRow(ts);
   window._currentTimesheet = ts;
   const main = document.querySelector('.main-content');
   const jobs = getJobs();
+  const rs = getRateSheet();
+  const laborRates = rs.laborRates || [];
   const backAction = ts.jobId ? `openJobDashboard('${ts.jobId}')` : `showPage('timesheets')`;
+  const totalHrs = getTimesheetTotalHours(ts);
 
   main.innerHTML = `
     <div class="page-header">
       <div style="display:flex;align-items:center;gap:12px;">
         <button class="btn-icon" onclick="${backAction}" title="Back">←</button>
-        <h1>Timesheet Entry</h1>
+        <h1>Timesheet</h1>
       </div>
       <div class="page-header-actions">
-        <button class="btn btn-secondary" onclick="saveCurrentTimesheet()">Save Entry</button>
+        <button class="btn btn-secondary" onclick="saveCurrentTimesheet()">Save Timesheet</button>
       </div>
     </div>
+
     <div class="card">
-      <div class="card-title"><div class="accent-bar"></div>Entry Details</div>
-      <div class="form-grid">
-        <div class="form-group"><label class="form-label">Date</label><input class="form-input" type="date" id="ts-date" value="${ts.date}"></div>
-        <div class="form-group"><label class="form-label">Employee Name</label><input class="form-input" id="ts-employee" value="${escapeHtml(ts.employeeName)}"></div>
-        <div class="form-group"><label class="form-label">Employee Type</label>
-          <select class="form-select" id="ts-empType" onchange="applyEmployeeTypeRates()">
-            <option value="">— Select Type —</option>
-            ${getEmployeeTypes().map(t => '<option value="' + t.id + '"' + (ts.employeeType === t.id ? ' selected' : '') + '>' + escapeHtml(t.name) + ' (' + formatCurrency(t.defaultRate) + '/hr)</option>').join('')}
-          </select>
-        </div>
-        <div class="form-group"><label class="form-label">Job</label>
+      <div class="card-title"><div class="accent-bar"></div>Timesheet Information</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+        <div class="form-group"><label class="form-label">Job *</label>
           <select class="form-select" id="ts-job">
             <option value="">— No Job —</option>
             ${jobs.map(j => `<option value="${j.id}" ${ts.jobId === j.id ? 'selected' : ''}>${escapeHtml(j.jobNumber)} — ${escapeHtml(j.name)}</option>`).join('')}
           </select>
         </div>
-        <div class="form-group full-width"><label class="form-label">Work Description</label><input class="form-input" id="ts-desc" value="${escapeHtml(ts.description)}"></div>
+        <div class="form-group"><label class="form-label">Date (Start)</label><input class="form-input" type="date" id="ts-date" value="${ts.date}"></div>
+        <div class="form-group"><label class="form-label">Date (End) <span style="font-size:10px;color:var(--text-muted);">(optional)</span></label><input class="form-input" type="date" id="ts-date-end" value="${ts.dateEnd || ''}"></div>
+        <div class="form-group"><label class="form-label">PO Number</label><input class="form-input" id="ts-po" value="${escapeHtml(ts.poNumber || '')}" placeholder="PO #"></div>
+        <div class="form-group"><label class="form-label">WO Number</label><input class="form-input" id="ts-wo" value="${escapeHtml(ts.woNumber || '')}" placeholder="WO #"></div>
+        <div class="form-group"><label class="form-label">Foreman / Supervisor</label><input class="form-input" id="ts-foreman" value="${escapeHtml(ts.foreman || '')}" placeholder="Foreman name"></div>
       </div>
     </div>
+
     <div class="card">
-      <div class="card-title"><div class="accent-bar"></div>Hours & Rates</div>
-      <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr;">
-        <div class="form-group">
-          <label class="form-label">Regular Hours</label>
-          <input class="form-input" type="number" id="ts-hrsReg" value="${ts.hoursRegular}" min="0" step="0.25" onchange="recalcTimesheet()">
-          <label class="form-label" style="margin-top:8px;">Rate</label>
-          <input class="form-input" type="number" id="ts-rateReg" value="${ts.rateRegular}" min="0" step="0.01" onchange="recalcTimesheet()">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Overtime Hours</label>
-          <input class="form-input" type="number" id="ts-hrsOT" value="${ts.hoursOvertime}" min="0" step="0.25" onchange="recalcTimesheet()">
-          <label class="form-label" style="margin-top:8px;">Rate</label>
-          <input class="form-input" type="number" id="ts-rateOT" value="${ts.rateOvertime}" min="0" step="0.01" onchange="recalcTimesheet()">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Travel Hours</label>
-          <input class="form-input" type="number" id="ts-hrsTravel" value="${ts.hoursTravel}" min="0" step="0.25" onchange="recalcTimesheet()">
-          <label class="form-label" style="margin-top:8px;">Rate</label>
-          <input class="form-input" type="number" id="ts-rateTravel" value="${ts.rateTravel}" min="0" step="0.01" onchange="recalcTimesheet()">
-        </div>
+      <div class="card-title"><div class="accent-bar"></div>Time Entries <span style="font-size:12px;font-weight:400;color:var(--text-secondary);margin-left:8px;">(${ts.rows.length} row${ts.rows.length !== 1 ? 's' : ''} · ${totalHrs.toFixed(1)} total hours)</span></div>
+      <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Each row = one technician's time entry. Hour types are pulled from your rate sheet. NO dollar amounts appear on the timesheet — customer signs off on hours and types only.</p>
+      <div class="table-scroll">
+        <table class="line-items-table" id="ts-rows-table">
+          <thead><tr>
+            <th style="width:30px;">#</th>
+            <th style="min-width:160px;">Technician</th>
+            <th style="min-width:140px;">Hour Type</th>
+            <th style="width:80px;">Hours</th>
+            <th style="min-width:200px;">Description</th>
+            <th style="min-width:200px;">Work Reason</th>
+            <th style="width:40px;"></th>
+          </tr></thead>
+          <tbody id="ts-rows-body"></tbody>
+        </table>
       </div>
-      <div class="totals-section" style="margin-top:16px;">
-        <div class="totals-table">
-          <div class="totals-row"><span class="label">Regular:</span><span class="value" id="ts-costReg">$0.00</span></div>
-          <div class="totals-row"><span class="label">Overtime:</span><span class="value" id="ts-costOT">$0.00</span></div>
-          <div class="totals-row"><span class="label">Travel:</span><span class="value" id="ts-costTravel">$0.00</span></div>
-          <div class="totals-row total"><span class="label">Total Cost:</span><span class="value" id="ts-total">$0.00</span></div>
-        </div>
+      <div style="margin-top:10px;display:flex;gap:8px;">
+        <button class="btn btn-secondary btn-sm" onclick="addTimesheetRow()">+ Add Row</button>
+        <button class="btn btn-secondary btn-sm" onclick="duplicateLastTimesheetRow()">Duplicate Last Row</button>
       </div>
+      <div id="ts-validation-msg" style="margin-top:8px;"></div>
     </div>
+
     <div class="card">
       <div class="card-title"><div class="accent-bar"></div>Notes</div>
-      <textarea class="form-textarea" id="ts-notes" rows="3">${escapeHtml(ts.notes)}</textarea>
+      <textarea class="form-textarea" id="ts-notes" rows="3">${escapeHtml(ts.notes || '')}</textarea>
     </div>
   `;
-  recalcTimesheet();
+  renderTimesheetRows();
+}
+
+function renderTimesheetRows() {
+  const ts = window._currentTimesheet;
+  if (!ts || !ts.rows) return;
+  const tbody = document.getElementById('ts-rows-body');
+  if (!tbody) return;
+  const rs = getRateSheet();
+  const laborRates = rs.laborRates || [];
+  const rosterNames = getEmployeeRosterNames();
+
+  tbody.innerHTML = ts.rows.map((row, i) => {
+    const isCustomName = row.technicianName && !rosterNames.find(e => e.name === row.technicianName);
+    return `
+    <tr>
+      <td style="text-align:center;font-weight:600;color:var(--text-secondary);">${i + 1}</td>
+      <td>
+        <select class="form-select" style="font-size:12px;" onchange="onTsRowTechSelect(${i}, this.value)">
+          <option value="">— Select —</option>
+          ${rosterNames.map(e => '<option value="' + escapeHtml(e.name) + '"' + (row.technicianName === e.name ? ' selected' : '') + '>' + escapeHtml(e.name) + (e.classification === '1099' ? ' (1099)' : '') + '</option>').join('')}
+          <option value="__custom__"${isCustomName ? ' selected' : ''}>— Custom Name —</option>
+        </select>
+        ${isCustomName ? '<input class="form-input" style="margin-top:4px;font-size:12px;" value="' + escapeHtml(row.technicianName) + '" placeholder="Name" onchange="window._currentTimesheet.rows[' + i + '].technicianName=this.value;">' : ''}
+      </td>
+      <td>
+        <select class="form-select" style="font-size:12px;" onchange="window._currentTimesheet.rows[${i}].hourType=this.value;">
+          ${laborRates.map(lr => '<option value="' + lr.id + '"' + (row.hourType === lr.id ? ' selected' : '') + '>' + escapeHtml(lr.name) + '</option>').join('')}
+        </select>
+      </td>
+      <td><input class="form-input" type="number" value="${row.hours || 0}" min="0" step="0.25" style="font-size:12px;width:70px;" onchange="window._currentTimesheet.rows[${i}].hours=parseFloat(this.value)||0; updateTsRowSummary();"></td>
+      <td><input class="form-input" value="${escapeHtml(row.description || '')}" placeholder="Work performed" style="font-size:12px;" onchange="window._currentTimesheet.rows[${i}].description=this.value;"></td>
+      <td style="font-size:11px;">
+        ${WORK_REASONS.map(wr => '<label style="display:inline-flex;align-items:center;gap:3px;margin-right:8px;cursor:pointer;"><input type="checkbox" ' + (row.workReasons && row.workReasons.includes(wr.id) ? 'checked' : '') + ' onchange="toggleTsRowWorkReason(' + i + ',\'' + wr.id + '\',this.checked)">' + wr.label + '</label>').join('')}
+      </td>
+      <td><button class="delete-btn" onclick="removeTimesheetRow(${i})" title="Remove row">✕</button></td>
+    </tr>`;
+  }).join('');
+  updateTsRowSummary();
+}
+
+function updateTsRowSummary() {
+  const ts = window._currentTimesheet;
+  if (!ts) return;
+  const totalHrs = getTimesheetTotalHours(ts);
+  // Update header summary if exists
+  const cardTitle = document.querySelector('#ts-rows-table')?.closest('.card')?.querySelector('.card-title span');
+  if (cardTitle) cardTitle.textContent = '(' + ts.rows.length + ' row' + (ts.rows.length !== 1 ? 's' : '') + ' \u00b7 ' + totalHrs.toFixed(1) + ' total hours)';
+  // Run validation
+  showTimesheetValidationWarnings();
+}
+
+function onTsRowTechSelect(rowIdx, val) {
+  const ts = window._currentTimesheet;
+  if (!ts || !ts.rows[rowIdx]) return;
+  if (val === '__custom__') {
+    ts.rows[rowIdx].technicianName = '';
+    renderTimesheetRows();
+    return;
+  }
+  ts.rows[rowIdx].technicianName = val;
+  renderTimesheetRows();
+}
+
+function toggleTsRowWorkReason(rowIdx, reasonId, checked) {
+  const ts = window._currentTimesheet;
+  if (!ts || !ts.rows[rowIdx]) return;
+  if (!ts.rows[rowIdx].workReasons) ts.rows[rowIdx].workReasons = [];
+  if (checked) {
+    if (!ts.rows[rowIdx].workReasons.includes(reasonId)) ts.rows[rowIdx].workReasons.push(reasonId);
+  } else {
+    ts.rows[rowIdx].workReasons = ts.rows[rowIdx].workReasons.filter(r => r !== reasonId);
+  }
+}
+
+function addTimesheetRow() {
+  const ts = window._currentTimesheet;
+  if (!ts) return;
+  ts.rows.push(getDefaultTimesheetRow());
+  renderTimesheetRows();
+}
+
+function duplicateLastTimesheetRow() {
+  const ts = window._currentTimesheet;
+  if (!ts || ts.rows.length === 0) { addTimesheetRow(); return; }
+  const last = ts.rows[ts.rows.length - 1];
+  const dup = { ...last, rowId: generateId(), hours: 0, description: '' };
+  dup.workReasons = [...(last.workReasons || [])];
+  ts.rows.push(dup);
+  renderTimesheetRows();
+}
+
+function removeTimesheetRow(idx) {
+  const ts = window._currentTimesheet;
+  if (!ts) return;
+  if (ts.rows.length <= 1) { showToast('Timesheet must have at least one row', 'error'); return; }
+  ts.rows.splice(idx, 1);
+  renderTimesheetRows();
 }
 
 function recalcTimesheet() {
+  // Legacy compatibility — no longer used for new timesheets but kept for old code paths
   const hR = parseFloat(document.getElementById('ts-hrsReg')?.value) || 0;
   const hO = parseFloat(document.getElementById('ts-hrsOT')?.value) || 0;
   const hT = parseFloat(document.getElementById('ts-hrsTravel')?.value) || 0;
@@ -2722,9 +3057,9 @@ function recalcTimesheet() {
   const rO = parseFloat(document.getElementById('ts-rateOT')?.value) || 0;
   const rT = parseFloat(document.getElementById('ts-rateTravel')?.value) || 0;
   const cR = hR * rR, cO = hO * rO, cT = hT * rT;
-  document.getElementById('ts-costReg').textContent = formatCurrency(cR);
-  document.getElementById('ts-costOT').textContent = formatCurrency(cO);
-  document.getElementById('ts-costTravel').textContent = formatCurrency(cT);
+  if (document.getElementById('ts-costReg')) document.getElementById('ts-costReg').textContent = formatCurrency(cR);
+  if (document.getElementById('ts-costOT')) document.getElementById('ts-costOT').textContent = formatCurrency(cO);
+  if (document.getElementById('ts-costTravel')) document.getElementById('ts-costTravel').textContent = formatCurrency(cT);
   document.getElementById('ts-total').textContent = formatCurrency(cR + cO + cT);
 }
 
@@ -2745,24 +3080,147 @@ function applyEmployeeTypeRates() {
   recalcTimesheet();
 }
 
+function onTimesheetEmployeeSelect() {
+  const sel = document.getElementById('ts-employee-select');
+  const customInput = document.getElementById('ts-employee-custom');
+  const hiddenInput = document.getElementById('ts-employee');
+  if (sel.value === '__custom__') {
+    customInput.style.display = 'block';
+    customInput.focus();
+    hiddenInput.value = customInput.value;
+    // Listen for typing in custom field
+    customInput.oninput = function() { hiddenInput.value = this.value; };
+  } else {
+    customInput.style.display = 'none';
+    hiddenInput.value = sel.value;
+    // Auto-fill employee type from roster
+    const rosterEmps = getEmployeeRosterNames();
+    const match = rosterEmps.find(e => e.name === sel.value);
+    if (match && match.employeeType) {
+      const empTypeSelect = document.getElementById('ts-empType');
+      if (empTypeSelect) {
+        empTypeSelect.value = match.employeeType;
+        applyEmployeeTypeRates();
+      }
+    }
+  }
+}
+
+// ===== TIMESHEET VALIDATION =====
+function validateTimesheetDuplicates(ts) {
+  // Check for duplicate: same technician + same date + same job in existing timesheets
+  const existingTimesheets = getTimesheets().filter(t => t.id !== ts.id);
+  const warnings = [];
+  const tsDate = ts.date;
+  const tsJobId = ts.jobId;
+
+  if (!tsJobId || !tsDate) return warnings;
+
+  ts.rows.forEach((row, idx) => {
+    if (!row.technicianName) return;
+    // Check against other timesheets
+    existingTimesheets.forEach(other => {
+      if (other.jobId !== tsJobId) return;
+      if (other.date !== tsDate && !(other.dateEnd && tsDate >= other.date && tsDate <= other.dateEnd)) return;
+      const otherTechs = getTimesheetTechnicians(other);
+      if (otherTechs.includes(row.technicianName)) {
+        warnings.push('Row ' + (idx + 1) + ': "' + row.technicianName + '" already has a timesheet entry for this job on ' + tsDate + ' (Timesheet ID: ' + other.id.substring(0, 8) + ')');
+      }
+    });
+    // Check within this timesheet for same tech + same hour type
+    ts.rows.forEach((otherRow, otherIdx) => {
+      if (otherIdx <= idx) return;
+      if (otherRow.technicianName === row.technicianName && otherRow.hourType === row.hourType) {
+        warnings.push('Rows ' + (idx + 1) + ' and ' + (otherIdx + 1) + ': Same technician ("' + row.technicianName + '") with same hour type ("' + row.hourType + '") — consider combining.');
+      }
+    });
+  });
+  return warnings;
+}
+
+function validateTimesheetDateRange(ts) {
+  // Check if timesheet date falls outside the job's open/close dates
+  const warnings = [];
+  if (!ts.jobId || !ts.date) return warnings;
+  const job = getJobById(ts.jobId);
+  if (!job) return warnings;
+
+  if (job.startDate && ts.date < job.startDate) {
+    warnings.push('Timesheet date (' + ts.date + ') is BEFORE the job start date (' + job.startDate + ').');
+  }
+  if (job.endDate && ts.date > job.endDate) {
+    warnings.push('Timesheet date (' + ts.date + ') is AFTER the job end date (' + job.endDate + ').');
+  }
+  if (ts.dateEnd) {
+    if (job.startDate && ts.dateEnd < job.startDate) {
+      warnings.push('Timesheet end date (' + ts.dateEnd + ') is BEFORE the job start date (' + job.startDate + ').');
+    }
+    if (job.endDate && ts.dateEnd > job.endDate) {
+      warnings.push('Timesheet end date (' + ts.dateEnd + ') is AFTER the job end date (' + job.endDate + ').');
+    }
+  }
+  if (job.status === 'completed' || job.status === 'closed') {
+    warnings.push('This job is marked as "' + job.status + '". Adding timesheets to a closed job may be unintentional.');
+  }
+  return warnings;
+}
+
+function showTimesheetValidationWarnings() {
+  const ts = window._currentTimesheet;
+  if (!ts) return;
+  const dupWarnings = validateTimesheetDuplicates(ts);
+  const dateWarnings = validateTimesheetDateRange(ts);
+  const allWarnings = [...dupWarnings, ...dateWarnings];
+  const msgDiv = document.getElementById('ts-validation-msg');
+  if (!msgDiv) return;
+  if (allWarnings.length === 0) {
+    msgDiv.innerHTML = '';
+    return;
+  }
+  msgDiv.innerHTML = '<div style="padding:10px;background:#F59E0B15;border:1px solid #F59E0B40;border-radius:6px;font-size:12px;color:#F59E0B;"><strong>\u26a0 Validation Warnings:</strong><ul style="margin:6px 0 0 16px;padding:0;">' + allWarnings.map(w => '<li style="margin-bottom:4px;">' + escapeHtml(w) + '</li>').join('') + '</ul></div>';
+}
+
 function saveCurrentTimesheet() {
   const ts = window._currentTimesheet;
-  ts.date = document.getElementById('ts-date').value;
-  ts.employeeName = document.getElementById('ts-employee').value;
-  ts.employeeType = document.getElementById('ts-empType')?.value || '';
-  ts.jobId = document.getElementById('ts-job').value;
-  ts.description = document.getElementById('ts-desc').value;
-  ts.hoursRegular = parseFloat(document.getElementById('ts-hrsReg').value) || 0;
-  ts.hoursOvertime = parseFloat(document.getElementById('ts-hrsOT').value) || 0;
-  ts.hoursTravel = parseFloat(document.getElementById('ts-hrsTravel').value) || 0;
-  ts.rateRegular = parseFloat(document.getElementById('ts-rateReg').value) || 0;
-  ts.rateOvertime = parseFloat(document.getElementById('ts-rateOT').value) || 0;
-  ts.rateTravel = parseFloat(document.getElementById('ts-rateTravel').value) || 0;
-  ts.totalCost = (ts.hoursRegular * ts.rateRegular) + (ts.hoursOvertime * ts.rateOvertime) + (ts.hoursTravel * ts.rateTravel);
-  ts.notes = document.getElementById('ts-notes').value;
+  if (!ts) { showToast('No timesheet data', 'error'); return; }
+
+  // Read header fields
+  ts.date = document.getElementById('ts-date')?.value || todayStr();
+  ts.dateEnd = document.getElementById('ts-date-end')?.value || '';
+  ts.jobId = document.getElementById('ts-job')?.value || '';
+  ts.poNumber = (document.getElementById('ts-po')?.value || '').trim();
+  ts.woNumber = (document.getElementById('ts-wo')?.value || '').trim();
+  ts.foreman = (document.getElementById('ts-foreman')?.value || '').trim();
+  ts.notes = document.getElementById('ts-notes')?.value || '';
+
+  // Rows are already updated in-place via onchange handlers
+  // Compute legacy fields for backward compatibility
+  const techs = getTimesheetTechnicians(ts);
+  ts.employeeName = techs.join(', ');
+  ts.description = ts.rows.map(r => r.description).filter(Boolean).join('; ');
+
+  // Compute totalCost internally using employee pay rates with hour-type multipliers (for P&L)
+  let totalCost = 0;
+  const roster = getEmployeeRoster();
+  const rs = getRateSheet();
+  ts.rows.forEach(row => {
+    const emp = roster.find(e => e.name === row.technicianName);
+    const basePayRate = emp ? (emp.payRate || 0) : 0;
+    // Apply hour-type multiplier (OT=1.5x, DT=2x, Holiday=2.5x, etc.) to employee base pay
+    const effectiveRate = getEmployeeEffectivePayRate(basePayRate, row.hourType);
+    totalCost += effectiveRate * (row.hours || 0);
+  });
+  ts.totalCost = totalCost;
+  ts.hoursRegular = ts.rows.filter(r => r.hourType === 'straight').reduce((s, r) => s + (r.hours || 0), 0);
+  ts.hoursOvertime = ts.rows.filter(r => r.hourType === 'overtime').reduce((s, r) => s + (r.hours || 0), 0);
+  ts.hoursTravel = ts.rows.filter(r => r.hourType === 'travel').reduce((s, r) => s + (r.hours || 0), 0);
+
+  // Run validation and show warnings (but still allow save)
+  showTimesheetValidationWarnings();
+
   saveDocument('timesheets', ts);
   editingDocId = ts.id;
-  showToast('Timesheet entry saved!');
+  showToast('Timesheet saved!', 'success');
 }
 
 // ============================================================
@@ -4490,8 +4948,23 @@ function generatePnlFromJob(jobId) {
     });
   });
 
-  // Actual costs from timesheets
-  const actualLabor = timesheets.reduce((s, t) => s + (t.totalCost || 0), 0);
+  // Actual costs from timesheets — use employee pay rates for internal cost
+  const roster = getEmployeeRoster();
+  let actualLabor = 0;
+  timesheets.forEach(ts => {
+    if (ts.rows && ts.rows.length > 0) {
+      // New multi-row format: compute cost per row using employee pay rate with hour-type multipliers
+      ts.rows.forEach(row => {
+        const emp = roster.find(e => e.name === row.technicianName);
+        const basePayRate = emp ? (emp.payRate || 0) : 0;
+        const effectiveRate = getEmployeeEffectivePayRate(basePayRate, row.hourType);
+        actualLabor += effectiveRate * (row.hours || 0);
+      });
+    } else {
+      // Legacy format: use stored totalCost
+      actualLabor += (ts.totalCost || 0);
+    }
+  });
   catMap['labor'].actual = actualLabor;
 
   // Actual costs from travel
@@ -4940,9 +5413,9 @@ function renderSettings() {
     <div class="page-header"><h1>Settings</h1></div>
     <div class="card">
       <div class="card-title"><div class="accent-bar"></div>Company Information</div>
-      <div class="form-grid">
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
         <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="s-name" value="${escapeHtml(company.name)}"></div>
-        <div class="form-group"><label class="form-label">Tagline <span style="font-size:0.7rem;opacity:0.5;">(shown below sidebar logo)</span></label><input class="form-input" id="s-tagline" value="${escapeHtml(company.tagline)}" placeholder="e.g. Electrical Power Experts"></div>
+        <div class="form-group"><label class="form-label">Tagline</label><input class="form-input" id="s-tagline" value="${escapeHtml(company.tagline)}" placeholder="e.g. Electrical Power Experts"><span style="font-size:0.65rem;opacity:0.45;margin-top:3px;">Shown below sidebar logo</span></div>
         <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="s-phone" value="${escapeHtml(company.phone)}"></div>
         <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="s-email" value="${escapeHtml(company.email)}"></div>
         <div class="form-group"><label class="form-label">Website</label><input class="form-input" id="s-website" value="${escapeHtml(company.website)}"></div>
@@ -5137,12 +5610,23 @@ function toggleSkillDetail() {
   showToast(show ? 'Skill detail will appear on customer docs' : 'Skill detail hidden from customer docs');
 }
 
+// --- Drag-and-drop state for Employee Types ---
+let _empTypeDragIdx = null;
+
 function renderSettingsEmployeeTypes() {
   const container = document.getElementById('s-empTypes');
   if (!container) return;
   const types = getEmployeeTypes();
   container.innerHTML = types.map((t, i) => `
-    <div class="mini-row" style="padding:10px 12px;display:flex;align-items:center;gap:12px;">
+    <div class="mini-row emp-type-drag-row" draggable="true" data-emptype-idx="${i}"
+         style="padding:10px 12px;display:flex;align-items:center;gap:12px;cursor:grab;transition:background 0.2s, opacity 0.2s;"
+         ondragstart="empTypeDragStart(event, ${i})"
+         ondragover="empTypeDragOver(event, ${i})"
+         ondragenter="empTypeDragEnter(event)"
+         ondragleave="empTypeDragLeave(event)"
+         ondrop="empTypeDrop(event, ${i})"
+         ondragend="empTypeDragEnd(event)">
+      <div class="drag-handle" style="cursor:grab;font-size:18px;opacity:0.4;user-select:none;" title="Drag to reorder">☰</div>
       <input type="color" value="${t.color}" style="width:30px;height:30px;border:none;cursor:pointer;" onchange="updateEmpType(${i},'color',this.value)">
       <div style="flex:1;">
         <input class="form-input" value="${escapeHtml(t.name)}" placeholder="Type name" style="font-weight:600;margin-bottom:4px;" onchange="updateEmpType(${i},'name',this.value)">
@@ -5152,9 +5636,70 @@ function renderSettingsEmployeeTypes() {
         <label style="font-size:11px;color:var(--text-secondary);">Default Rate</label>
         <input class="form-input" type="number" value="${t.defaultRate}" min="0" step="5" onchange="updateEmpType(${i},'defaultRate',parseFloat(this.value)||0)">
       </div>
+      <div style="display:flex;flex-direction:column;gap:2px;">
+        <button class="btn-icon" onclick="moveEmpType(${i}, -1)" title="Move Up" style="font-size:14px;padding:2px 6px;"${i === 0 ? ' disabled' : ''}>▲</button>
+        <button class="btn-icon" onclick="moveEmpType(${i}, 1)" title="Move Down" style="font-size:14px;padding:2px 6px;"${i === types.length - 1 ? ' disabled' : ''}>▼</button>
+      </div>
       <button class="btn-icon" onclick="removeEmpType(${i})" title="Remove">\u2715</button>
     </div>
   `).join('');
+}
+
+// Drag-and-drop handlers for Employee Types
+function empTypeDragStart(e, idx) {
+  _empTypeDragIdx = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', idx);
+  setTimeout(() => { e.target.style.opacity = '0.4'; }, 0);
+}
+
+function empTypeDragOver(e, idx) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function empTypeDragEnter(e) {
+  e.preventDefault();
+  const row = e.target.closest('.emp-type-drag-row');
+  if (row) row.style.background = 'var(--accent-primary-alpha, rgba(59,130,246,0.15))';
+}
+
+function empTypeDragLeave(e) {
+  const row = e.target.closest('.emp-type-drag-row');
+  if (row) row.style.background = '';
+}
+
+function empTypeDrop(e, dropIdx) {
+  e.preventDefault();
+  const row = e.target.closest('.emp-type-drag-row');
+  if (row) row.style.background = '';
+  if (_empTypeDragIdx === null || _empTypeDragIdx === dropIdx) return;
+  const types = getEmployeeTypes();
+  const [moved] = types.splice(_empTypeDragIdx, 1);
+  types.splice(dropIdx, 0, moved);
+  saveEmployeeTypes(types);
+  _empTypeDragIdx = null;
+  renderSettingsEmployeeTypes();
+  showToast('Employee type reordered');
+}
+
+function empTypeDragEnd(e) {
+  e.target.style.opacity = '1';
+  _empTypeDragIdx = null;
+  // Reset all row backgrounds
+  document.querySelectorAll('.emp-type-drag-row').forEach(r => r.style.background = '');
+}
+
+// Move up/down buttons as alternative to drag-and-drop
+function moveEmpType(idx, direction) {
+  const types = getEmployeeTypes();
+  const newIdx = idx + direction;
+  if (newIdx < 0 || newIdx >= types.length) return;
+  const [moved] = types.splice(idx, 1);
+  types.splice(newIdx, 0, moved);
+  saveEmployeeTypes(types);
+  renderSettingsEmployeeTypes();
+  showToast('Employee type moved ' + (direction < 0 ? 'up' : 'down'));
 }
 
 function updateEmpType(idx, key, value) {
@@ -5441,6 +5986,7 @@ function migrateData(data) {
     if (!data.docClassifications) data.docClassifications = null; // will use defaults
     if (!data.internalDocPassword) data.internalDocPassword = 'internalonly';
     if (data.showSkillDetail === undefined) data.showSkillDetail = false;
+    if (!data.employeeRoster) data.employeeRoster = [];
     // Migrate documents that don't have status fields
     if (data.quotes && Array.isArray(data.quotes)) {
       data.quotes.forEach(q => { if (!q.status) q.status = 'draft'; });
@@ -5454,6 +6000,38 @@ function migrateData(data) {
     }
     log.push('v5→v6: Added employee types, doc classifications, internal password, skill detail. Migrated document statuses.');
     v = 6;
+  }
+
+  // --- v6 → v7: Multi-row timesheets, employee HR fields (payRate, SSN, address, active status) ---
+  if (v < 7) {
+    // Migrate timesheets to multi-row format
+    if (data.timesheets && Array.isArray(data.timesheets)) {
+      data.timesheets.forEach(ts => {
+        if (!ts.rows || ts.rows.length === 0) {
+          const rows = [];
+          if (ts.hoursRegular > 0) rows.push({ rowId: (Math.random().toString(36).substr(2, 9)), technicianName: ts.employeeName || '', hourType: 'straight', hours: ts.hoursRegular, description: ts.description || '', workReasons: [] });
+          if (ts.hoursOvertime > 0) rows.push({ rowId: (Math.random().toString(36).substr(2, 9)), technicianName: ts.employeeName || '', hourType: 'overtime', hours: ts.hoursOvertime, description: ts.description || '', workReasons: [] });
+          if (ts.hoursTravel > 0) rows.push({ rowId: (Math.random().toString(36).substr(2, 9)), technicianName: ts.employeeName || '', hourType: 'travel', hours: ts.hoursTravel, description: ts.description || '', workReasons: [] });
+          if (rows.length === 0) rows.push({ rowId: (Math.random().toString(36).substr(2, 9)), technicianName: ts.employeeName || '', hourType: 'straight', hours: 0, description: ts.description || '', workReasons: [] });
+          ts.rows = rows;
+        }
+        if (!ts.dateEnd) ts.dateEnd = '';
+        if (!ts.poNumber) ts.poNumber = '';
+        if (!ts.woNumber) ts.woNumber = '';
+        if (!ts.foreman) ts.foreman = '';
+      });
+    }
+    // Migrate employee roster with new fields
+    if (data.employeeRoster && Array.isArray(data.employeeRoster)) {
+      data.employeeRoster.forEach(emp => {
+        if (!emp.payRate) emp.payRate = 0;
+        if (!emp.ssnLast4) emp.ssnLast4 = '';
+        if (!emp.address) emp.address = '';
+        if (emp.active === undefined) emp.active = true;
+      });
+    }
+    log.push('v6\u2192v7: Migrated timesheets to multi-row format. Added employee HR fields (payRate, SSN, address, active).');
+    v = 7;
   }
 
   data.version = v;
@@ -5967,6 +6545,7 @@ function exportAllData() {
     docClassifications: getDocClassifications(),
     internalDocPassword: getInternalDocPassword(),
     showSkillDetail: getShowSkillDetail(),
+    employeeRoster: getEmployeeRoster(),
   };
   // Capture CPA notes for all years
   for (let y = 2020; y <= new Date().getFullYear() + 1; y++) {
@@ -6084,6 +6663,7 @@ function executeFullImport(data, scan, origVersion, migration, validation) {
   if (data.docClassifications) saveDocClassifications(data.docClassifications);
   if (data.internalDocPassword) setInternalDocPassword(data.internalDocPassword);
   if (data.showSkillDetail !== undefined) setShowSkillDetail(data.showSkillDetail);
+  if (data.employeeRoster && Array.isArray(data.employeeRoster)) saveEmployeeRoster(data.employeeRoster);
   updateSidebarLogo();
   renderPage();
 
@@ -6475,6 +7055,7 @@ function previewSamplePDF() {
     bodyStyles: { fillColor: hexToRgb(colors.tableBg), textColor: hexToRgb(colors.text), fontSize: 9, lineColor: hexToRgb(colors.border), lineWidth: 0.2 },
     alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
     columnStyles: { 0: { cellWidth: 80 }, 1: { halign: 'center' }, 2: { halign: 'center' }, 3: { halign: 'right' }, 4: { halign: 'right', fontStyle: 'bold' } },
+    didDrawPage: pdfAutoTablePageHook(theme),
   });
   y = doc.lastAutoTable.finalY + 8;
   const sub = 4 * straightRate + 450 + 2 * straightRate + (rs.perDiem || 250);
@@ -6573,6 +7154,52 @@ function hexToRgb(hex) {
   return [r, g, b];
 }
 
+// Global PDF helper: fill page background on new pages created by autoTable
+function pdfAutoTablePageHook(theme) {
+  return function(data) {
+    const doc = data.doc;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    if (data.pageNumber > 1) {
+      doc.setFillColor(...hexToRgb(theme.colors.bg));
+      doc.rect(0, 0, pageWidth, pageHeight, 'F');
+    }
+  };
+}
+
+// Global PDF helper: check if we need a page break before drawing more content
+function pdfCheckPageBreak(doc, y, theme, needed) {
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  if (y + (needed || 30) > pageHeight - 20) {
+    doc.addPage();
+    doc.setFillColor(...hexToRgb(theme.colors.bg));
+    doc.rect(0, 0, pageWidth, pageHeight, 'F');
+    return 15; // reset y to top margin
+  }
+  return y;
+}
+
+// Global PDF helper: draw metadata as wrapped multi-line text instead of single line
+function pdfDrawMeta(doc, metaParts, x, y, maxWidth, theme) {
+  const colors = theme.colors;
+  doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.textSecondary));
+  const metaText = metaParts.filter(Boolean).join('  |  ');
+  const lines = doc.splitTextToSize(metaText, maxWidth);
+  doc.text(lines, x, y);
+  return y + lines.length * 4.5 + 3;
+}
+
+// Global PDF helper: draw footer with accent line and company info
+function pdfDrawFooter(doc, theme, company) {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  doc.setDrawColor(...hexToRgb(theme.colors.accent)); doc.setLineWidth(0.5);
+  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
+  doc.setFontSize(7); doc.setTextColor(...hexToRgb(theme.colors.textSecondary));
+  doc.text(`${company.name} | ${company.website || ''}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+}
+
 function drawPdfSineWaves(doc, theme, pageWidth, pageHeight) {
   const accent = hexToRgb(theme.colors.accent);
   doc.setDrawColor(accent[0], accent[1], accent[2]);
@@ -6625,7 +7252,7 @@ function pdfAddHeader(doc, theme, company, title, docNumber, pageWidth) {
   doc.text(company.address, logoEndX, 30);
 
   // Document title & number (right side)
-  const titleFontSize = title.length > 16 ? 14 : 18;
+  const titleFontSize = title.length > 30 ? 10 : title.length > 20 ? 12 : title.length > 16 ? 14 : 18;
   doc.setFontSize(titleFontSize); doc.setFont('helvetica', 'bold');
   doc.setTextColor(...hexToRgb(colors.accent));
   doc.text(title, pageWidth - 15, 16, { align: 'right' });
@@ -6695,13 +7322,15 @@ async function generatePDF(type, data) {
 
     // Date & meta info
     doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.textSecondary));
-    let metaText = `Date: ${formatDate(data.date)}`;
-    if (data.validUntil) metaText += `  |  Valid Until: ${formatDate(data.validUntil)}`;
-    if (data.netTerms) metaText += `  |  Terms: ${data.netTerms}`;
-    if (data.dueDate) metaText += `  |  Due: ${formatDate(data.dueDate)}`;
-    if (data.quoteRef) metaText += `  |  Quote Ref: ${data.quoteRef}`;
-    if (data.projectName) metaText += `  |  Project: ${data.projectName}`;
-    doc.text(metaText, 15, y); y += 8;
+    const metaParts = [
+      `Date: ${formatDate(data.date)}`,
+      data.validUntil ? `Valid Until: ${formatDate(data.validUntil)}` : '',
+      data.netTerms ? `Terms: ${data.netTerms}` : '',
+      data.dueDate ? `Due: ${formatDate(data.dueDate)}` : '',
+      data.quoteRef ? `Quote Ref: ${data.quoteRef}` : '',
+      data.projectName ? `Project: ${data.projectName}` : '',
+    ];
+    y = pdfDrawMeta(doc, metaParts, 15, y, pageWidth - 30, theme);
 
     // Recipient section
     const recipientLabel = type === 'po' ? 'VENDOR' : 'BILL TO';
@@ -6748,6 +7377,7 @@ async function generatePDF(type, data) {
       alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
       bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
       columnStyles: { 0: { cellWidth: 12 }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
 
     y = doc.lastAutoTable.finalY + 6;
@@ -6767,6 +7397,7 @@ async function generatePDF(type, data) {
 
     // Terms
     if (data.terms && data.terms.length > 0) {
+      y = pdfCheckPageBreak(doc, y, theme, 20);
       doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
       doc.line(15, y, 25, y); y += 4;
       doc.setFontSize(8); doc.setFont('helvetica', 'bold');
@@ -6774,17 +7405,18 @@ async function generatePDF(type, data) {
       doc.text('TERMS & CONDITIONS', 15, y); y += 5;
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
       doc.setTextColor(...hexToRgb(colors.textSecondary));
-      data.terms.forEach(t => { if (t) { doc.text('• ' + t, 15, y); y += 4; } });
+      data.terms.forEach(t => {
+        if (t) {
+          y = pdfCheckPageBreak(doc, y, theme, 8);
+          const tLines = doc.splitTextToSize('• ' + t, pageWidth - 30);
+          doc.text(tLines, 15, y); y += tLines.length * 4;
+        }
+      });
     }
   }
 
-  // Thin accent line at bottom
-  doc.setDrawColor(...hexToRgb(colors.accent));
-  doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  // Footer text
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  // Footer on last page
+  pdfDrawFooter(doc, theme, company);
 
   doc.save(`${data.docNumber || 'document'}.pdf`);
 }
@@ -6843,6 +7475,7 @@ async function generateEquipmentCertPDF() {
     headStyles: { fillColor: hexToRgb(colors.tableAlt), textColor: hexToRgb(colors.accent), fontStyle: 'bold' },
     alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
     bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
+    didDrawPage: pdfAutoTablePageHook(theme),
   });
 
   y = doc.lastAutoTable.finalY + 15;
@@ -6862,12 +7495,7 @@ async function generateEquipmentCertPDF() {
   doc.text('Date', 110, y + 5);
 
   // Thin accent line at bottom
-  doc.setDrawColor(...hexToRgb(colors.accent));
-  doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
-
+   pdfDrawFooter(doc, theme, company);
   doc.save(`Equipment-Calibration-Certificate-${todayStr()}.pdf`);
   showToast('Equipment Certificate PDF generated!');
 }
@@ -6876,97 +7504,240 @@ async function generateEquipmentCertPDF() {
 // PRINTABLE BLANK TIMESHEET PDF
 // ============================================================
 async function exportTimesheetPDF() {
+  // Prompt user to optionally select a job for the header
+  const jobs = getJobs();
+  let selectedJob = null;
+  if (jobs.length > 0) {
+    const jobList = jobs.map((j, i) => (i + 1) + '. ' + j.jobNumber + ' \u2014 ' + j.name).join('\n');
+    const choice = prompt('Select a job for the timesheet header (enter number), or leave blank for a generic timesheet:\n\n' + jobList);
+    if (choice && !isNaN(choice)) {
+      const idx = parseInt(choice) - 1;
+      if (idx >= 0 && idx < jobs.length) selectedJob = jobs[idx];
+    }
+  }
+
   const { jsPDF } = window.jspdf;
   const theme = getActiveTheme();
   const colors = theme.colors;
   const company = getCompany();
+  const rs = getRateSheet();
+  const laborRates = rs.laborRates || [];
   const doc = new jsPDF('p', 'mm', 'letter');
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 12;
+  const contentWidth = pageWidth - margin * 2;
 
+  // Background
   doc.setFillColor(...hexToRgb(colors.bg));
   doc.rect(0, 0, pageWidth, pageHeight, 'F');
 
-  let y = pdfAddHeader(doc, theme, company, 'DAILY', 'TIMESHEET', pageWidth);
+  // ===== HEADER WITH COMPANY BRANDING =====
+  let y = pdfAddHeader(doc, theme, company, 'FIELD', 'TIMESHEET', pageWidth);
 
-  // Fields to fill in
-  doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.text));
+  // ===== JOB INFORMATION BLOCK =====
+  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
+  doc.line(margin, y, margin + 12, y);
+  y += 4;
+  doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...hexToRgb(colors.accent));
+  doc.text('JOB INFORMATION', margin, y);
+  y += 6;
+
+  doc.setFontSize(8); doc.setTextColor(...hexToRgb(colors.text));
   doc.setDrawColor(...hexToRgb(colors.border)); doc.setLineWidth(0.3);
 
-  const fields = [
-    ['Employee Name:', 60], ['Date:', 60], ['Job Number:', 60], ['Job Name / Location:', 120],
-  ];
-  let fx = 15;
-  fields.forEach(([label, width], idx) => {
-    if (idx === 2) { fx = 15; y += 10; }
-    doc.setFont('helvetica', 'bold');
-    doc.text(label, fx, y);
-    const labelW = doc.getTextWidth(label) + 3;
-    doc.line(fx + labelW, y + 1, fx + width, y + 1);
-    fx += width + 10;
-  });
-  y += 14;
+  // Row 1: Job Number + PO # + WO #
+  doc.setFont('helvetica', 'bold');
+  doc.text('Job #:', margin, y);
+  doc.setFont('helvetica', 'normal');
+  if (selectedJob) doc.text(selectedJob.jobNumber || '', margin + 14, y);
+  doc.line(margin + 14, y + 1, margin + 50, y + 1);
+  doc.setFont('helvetica', 'bold');
+  doc.text('PO #:', margin + 56, y);
+  doc.line(margin + 66, y + 1, margin + 100, y + 1);
+  doc.text('WO #:', margin + 106, y);
+  doc.line(margin + 116, y + 1, pageWidth - margin, y + 1);
+  y += 6;
 
-  // Time table
-  const rows = 8;
-  const tableHead = [['Description of Work', 'Start', 'End', 'Reg Hrs', 'OT Hrs', 'Travel Hrs']];
-  const tableBody = Array.from({ length: rows }, () => ['', '', '', '', '', '']);
+  // Row 2: Job Name
+  doc.setFont('helvetica', 'bold');
+  doc.text('Job Name:', margin, y);
+  doc.setFont('helvetica', 'normal');
+  if (selectedJob) doc.text(selectedJob.name || '', margin + 22, y);
+  doc.line(margin + 22, y + 1, pageWidth - margin, y + 1);
+  y += 6;
+
+  // Row 3: Customer + Location
+  doc.setFont('helvetica', 'bold');
+  doc.text('Customer:', margin, y);
+  doc.setFont('helvetica', 'normal');
+  if (selectedJob && selectedJob.customer) doc.text(selectedJob.customer.name || '', margin + 22, y);
+  doc.line(margin + 22, y + 1, margin + 85, y + 1);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Location:', margin + 92, y);
+  doc.setFont('helvetica', 'normal');
+  if (selectedJob && selectedJob.customer) doc.text(selectedJob.customer.address || '', margin + 112, y);
+  doc.line(margin + 112, y + 1, pageWidth - margin, y + 1);
+  y += 6;
+
+  // Row 4: Date + Foreman
+  doc.setFont('helvetica', 'bold');
+  doc.text('Date:', margin, y);
+  doc.line(margin + 13, y + 1, margin + 50, y + 1);
+  doc.text('Foreman / Supervisor:', margin + 56, y);
+  doc.line(margin + 98, y + 1, pageWidth - margin, y + 1);
+  y += 8;
+
+  // ===== WORK REASON CHECKBOXES =====
+  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
+  doc.line(margin, y, margin + 12, y);
+  y += 4;
+  doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...hexToRgb(colors.accent));
+  doc.text('WORK REASON (check all that apply)', margin, y);
+  y += 6;
+
+  doc.setFontSize(7.5); doc.setTextColor(...hexToRgb(colors.text));
+  doc.setDrawColor(...hexToRgb(colors.border)); doc.setLineWidth(0.3);
+  const checkboxSize = 3.5;
+  let cx = margin;
+  WORK_REASONS.forEach((wr, i) => {
+    doc.rect(cx, y - 2.5, checkboxSize, checkboxSize);
+    doc.setFont('helvetica', 'normal');
+    doc.text(wr.label, cx + checkboxSize + 2, y);
+    cx += doc.getTextWidth(wr.label) + checkboxSize + 10;
+    if (cx > pageWidth - margin - 40 && i < WORK_REASONS.length - 1) {
+      cx = margin;
+      y += 5;
+    }
+  });
+  y += 7;
+
+  // ===== TIME ENTRY TABLE =====
+  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
+  doc.line(margin, y, margin + 12, y);
+  y += 4;
+  doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...hexToRgb(colors.accent));
+  doc.text('TIME ENTRIES', margin, y);
+  y += 2;
+
+  // Build hour type labels from rate sheet
+  const hourTypeLabels = laborRates.filter(lr => lr.id !== 'portal').map(lr => lr.name);
+
+  // Table: 10 rows for time entries (fits on single page with all sections)
+  const timeRows = 10;
+  const timeTableHead = [['#', 'Technician Name', 'Hour Type', 'Hours', 'Work Description']];
+  const timeTableBody = Array.from({ length: timeRows }, (_, i) => [String(i + 1), '', '', '', '']);
 
   doc.autoTable({
     startY: y,
-    head: tableHead,
-    body: tableBody,
-    margin: { left: 15, right: 15 },
-    styles: { fontSize: 8, cellPadding: 4, textColor: hexToRgb(colors.text), lineColor: hexToRgb(colors.border), lineWidth: 0.3, minCellHeight: 8 },
-    headStyles: { fillColor: hexToRgb(colors.tableAlt), textColor: hexToRgb(colors.accent), fontStyle: 'bold' },
+    head: timeTableHead,
+    body: timeTableBody,
+    margin: { left: margin, right: margin },
+    styles: {
+      fontSize: 7.5,
+      cellPadding: 2,
+      textColor: hexToRgb(colors.text),
+      lineColor: hexToRgb(colors.border),
+      lineWidth: 0.3,
+      minCellHeight: 6,
+    },
+    headStyles: {
+      fillColor: hexToRgb(colors.accent),
+      textColor: isLightColor(colors.accent) ? [30, 30, 30] : [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 7,
+    },
     bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
-    columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 22 }, 2: { cellWidth: 22 }, 3: { cellWidth: 22 }, 4: { cellWidth: 22 }, 5: { cellWidth: 25 } },
+    alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
+    columnStyles: {
+      0: { cellWidth: 10, halign: 'center' },
+      1: { cellWidth: 42 },
+      2: { cellWidth: 35 },
+      3: { cellWidth: 18, halign: 'center' },
+      4: { cellWidth: 'auto' },
+    },
+    didDrawPage: pdfAutoTablePageHook(theme),
   });
 
-  y = doc.lastAutoTable.finalY + 6;
+  y = doc.lastAutoTable.finalY + 3;
 
-  // Totals row
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-  doc.text('TOTALS:', 15, y);
-  doc.line(85, y + 1, 110, y + 1);
-  doc.text('Reg:', 115, y); doc.line(127, y + 1, 147, y + 1);
-  doc.text('OT:', 150, y); doc.line(160, y + 1, 180, y + 1);
-  y += 14;
+  // Hour Type Legend
+  doc.setFontSize(6.5); doc.setFont('helvetica', 'italic');
+  doc.setTextColor(...hexToRgb(colors.textSecondary));
+  doc.text('Hour Types: ' + hourTypeLabels.join(' | '), margin, y);
+  y += 5;
 
-  // Notes
-  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
-  doc.line(15, y, 25, y); y += 4;
-  doc.setFontSize(8); doc.setTextColor(...hexToRgb(colors.accent));
-  doc.text('NOTES', 15, y); y += 6;
-  doc.setDrawColor(...hexToRgb(colors.border));
-  for (let i = 0; i < 3; i++) { doc.line(15, y, pageWidth - 15, y); y += 8; }
+  // Totals summary
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+  doc.setTextColor(...hexToRgb(colors.text));
+  doc.setDrawColor(...hexToRgb(colors.border)); doc.setLineWidth(0.3);
+  doc.text('TOTAL HOURS:', margin, y);
+  doc.line(margin + 28, y + 1, margin + 55, y + 1);
+  y += 7;
+
+  // ===== WORK DESCRIPTION / NOTES =====
+  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
+  doc.line(margin, y, margin + 12, y);
+  y += 3;
+  doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...hexToRgb(colors.accent));
+  doc.text('ADDITIONAL NOTES', margin, y);
+  y += 5;
+  doc.setDrawColor(...hexToRgb(colors.border)); doc.setLineWidth(0.2);
+  for (let i = 0; i < 2; i++) {
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 5;
+  }
+  y += 2;
+
+  // ===== CUSTOMER ACKNOWLEDGMENT & SIGNATURE =====
+  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
+  doc.line(margin, y, margin + 12, y);
+  y += 3;
+  doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...hexToRgb(colors.accent));
+  doc.text('CUSTOMER ACKNOWLEDGMENT', margin, y);
+  y += 5;
+
+  doc.setFontSize(6.5); doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...hexToRgb(colors.textSecondary));
+  doc.text('By signing below, the customer acknowledges that the work described above was performed on the date(s) indicated', margin, y);
+  y += 3;
+  doc.text('and that the hours and hour types recorded are accurate. No dollar amounts are included on this document.', margin, y);
   y += 6;
 
-  // Signatures
-  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
-  doc.line(15, y, 25, y); y += 4;
-  doc.setFontSize(8); doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...hexToRgb(colors.accent));
-  doc.text('SIGNATURES', 15, y); y += 10;
   doc.setDrawColor(...hexToRgb(colors.border)); doc.setLineWidth(0.3);
-  doc.line(15, y, 90, y); doc.line(110, y, 185, y);
-  doc.setFont('helvetica', 'normal'); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text('Employee Signature', 15, y + 5);
-  doc.text('Date', 75, y + 5);
-  y += 14;
-  doc.line(15, y, 90, y); doc.line(110, y, 185, y);
-  doc.text('Customer Signature', 15, y + 5);
-  doc.text('Date', 75, y + 5);
+  doc.setFontSize(8); doc.setTextColor(...hexToRgb(colors.text));
 
-  // Thin accent line at bottom
-  doc.setDrawColor(...hexToRgb(colors.accent));
-  doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  // Customer signature line
+  doc.setFont('helvetica', 'bold');
+  doc.text('Customer Printed Name:', margin, y);
+  doc.line(margin + 48, y + 1, margin + 100, y + 1);
+  doc.text('Title:', margin + 108, y);
+  doc.line(margin + 118, y + 1, pageWidth - margin, y + 1);
+  y += 7;
 
-  doc.save(`Timesheet-Blank-${todayStr()}.pdf`);
-  showToast('Blank timesheet PDF generated!');
+  doc.text('Customer Signature:', margin, y);
+  doc.line(margin + 40, y + 1, margin + 120, y + 1);
+  doc.text('Date:', margin + 128, y);
+  doc.line(margin + 138, y + 1, pageWidth - margin, y + 1);
+  y += 7;
+
+  // Foreman / company rep signature
+  doc.text('Foreman Signature:', margin, y);
+  doc.line(margin + 40, y + 1, margin + 120, y + 1);
+  doc.text('Date:', margin + 128, y);
+  doc.line(margin + 138, y + 1, pageWidth - margin, y + 1);
+
+  // ===== FOOTER =====
+  pdfDrawFooter(doc, theme, company);
+
+  const filename = selectedJob ? `Timesheet-${selectedJob.jobNumber}-${todayStr()}.pdf` : `Timesheet-Blank-${todayStr()}.pdf`;
+  doc.save(filename);
+  showToast('Blank timesheet PDF generated!', 'success');
 }
 
 // ============================================================
@@ -7010,6 +7781,7 @@ async function exportEstimatePDF() {
     alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
     bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
     columnStyles: { 4: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' } },
+    didDrawPage: pdfAutoTablePageHook(theme),
   });
 
   y = doc.lastAutoTable.finalY + 6;
@@ -7023,12 +7795,7 @@ async function exportEstimatePDF() {
   doc.text('Est. Profit:', pageWidth - 80, y + 2); doc.text(formatCurrency(est.estimatedProfit), pageWidth - 15, y + 2, { align: 'right' });
 
   // Thin accent line at bottom
-  doc.setDrawColor(...hexToRgb(colors.accent));
-  doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | CONFIDENTIAL`, pageWidth / 2, pageHeight - 5, { align: 'center' });
-
+   pdfDrawFooter(doc, theme, company);
   doc.save(`${est.estimateNumber}.pdf`);
   showToast('Estimate PDF exported!');
 }
@@ -7089,6 +7856,7 @@ async function exportPnlPDF() {
     alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
     bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
     columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+    didDrawPage: pdfAutoTablePageHook(theme),
   });
 
   y = doc.lastAutoTable.finalY + 8;
@@ -7097,15 +7865,10 @@ async function exportPnlPDF() {
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
   doc.setTextColor(...hexToRgb(colors.text));
   doc.text('Estimated Profit:', 15, y); doc.text(formatCurrency(pnl.estimatedProfit), 100, y, { align: 'right' }); y += 6;
-  doc.setTextColor(...hexToRgb((pnl.actualProfit || 0) >= 0 ? '#22C55E' : '#DC2626'));
+  doc.setTextColor(...hexToRgb((pnl.actualProfit || 0) >= 0 ? (pdfDarkMode ? '#22C55E' : '#16A34A') : (pdfDarkMode ? '#EF4444' : '#DC2626')));
   doc.text('Actual Profit:', 15, y); doc.text(formatCurrency(pnl.actualProfit), 100, y, { align: 'right' });
 
-  // Thin accent line at bottom
-  doc.setDrawColor(...hexToRgb(colors.accent));
-  doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | CONFIDENTIAL`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  pdfDrawFooter(doc, theme, company);
 
   doc.save(`PnL-${job ? job.jobNumber : 'report'}.pdf`);
   showToast('P&L PDF exported!');
@@ -7169,10 +7932,7 @@ async function exportTaxSummaryPDF() {
   // Helper to check page space and add new page if needed
   function checkPage(needed) {
     if (y + needed > pageHeight - 20) {
-      // Thin accent line at bottom before page break
-      doc.setDrawColor(...hexToRgb(colors.accent));
-      doc.setLineWidth(0.5);
-      doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
+      pdfDrawFooter(doc, theme, company);
       doc.addPage();
       doc.setFillColor(...hexToRgb(colors.bg));
       doc.rect(0, 0, pageWidth, pageHeight, 'F');
@@ -7189,7 +7949,7 @@ async function exportTaxSummaryPDF() {
   doc.text(`Income: ${formatCurrency(totalIncome)}`, ml, y);
   doc.text(`Expenses: ${formatCurrency(totalExpenses)}`, ml + 55, y);
   doc.text(`Deductible: ${formatCurrency(totalDeductible)}`, ml + 110, y);
-  const netColor = netIncome >= 0 ? [34, 197, 94] : [239, 68, 68];
+  const netColor = netIncome >= 0 ? (pdfDarkMode ? [34, 197, 94] : [22, 163, 74]) : (pdfDarkMode ? [239, 68, 68] : [220, 38, 38]);
   doc.setTextColor(...netColor);
   doc.text(`Net: ${formatCurrency(netIncome)}`, pageWidth - mr, y, { align: 'right' });
   doc.setTextColor(...hexToRgb(colors.text));
@@ -7212,6 +7972,7 @@ async function exportTaxSummaryPDF() {
       footStyles: { fillColor: hexToRgb(colors.tableAlt), textColor: hexToRgb(colors.text), fontStyle: 'bold' },
       alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
       columnStyles: { 4: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 6;
   }
@@ -7236,6 +7997,7 @@ async function exportTaxSummaryPDF() {
       headStyles: headStyles,
       footStyles: { fillColor: hexToRgb(colors.tableAlt), textColor: hexToRgb(colors.text), fontStyle: 'bold' },
       columnStyles: { 1: { halign: 'center' }, 2: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 6;
   }
@@ -7257,6 +8019,7 @@ async function exportTaxSummaryPDF() {
       headStyles: headStyles,
       footStyles: { fillColor: hexToRgb(colors.tableAlt), textColor: hexToRgb(colors.text), fontStyle: 'bold' },
       columnStyles: { 1: { halign: 'center' }, 2: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 6;
   }
@@ -7274,6 +8037,7 @@ async function exportTaxSummaryPDF() {
       headStyles: headStyles,
       footStyles: { fillColor: hexToRgb(colors.tableAlt), textColor: hexToRgb(colors.text), fontStyle: 'bold' },
       columnStyles: { 2: { halign: 'right' }, 3: { halign: 'center' }, 4: { halign: 'center' }, 5: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 6;
   }
@@ -7291,6 +8055,7 @@ async function exportTaxSummaryPDF() {
       headStyles: headStyles,
       footStyles: { fillColor: hexToRgb(colors.tableAlt), textColor: hexToRgb(colors.text), fontStyle: 'bold' },
       columnStyles: { 4: { halign: 'center' }, 5: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 6;
   }
@@ -7308,6 +8073,7 @@ async function exportTaxSummaryPDF() {
       headStyles: headStyles,
       footStyles: { fillColor: hexToRgb(colors.tableAlt), textColor: hexToRgb(colors.text), fontStyle: 'bold' },
       columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 6;
   }
@@ -7330,8 +8096,9 @@ async function exportTaxSummaryPDF() {
     margin: { left: ml, right: mr },
     styles: tblStyles,
     headStyles: headStyles,
-    footStyles: { fillColor: hexToRgb(colors.accent), textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+    footStyles: { fillColor: hexToRgb(colors.accent), textColor: isLightColor(colors.accent) ? [30, 30, 30] : [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
     columnStyles: { 1: { halign: 'right' } },
+    didDrawPage: pdfAutoTablePageHook(theme),
   });
 
   // Footer on all pages
@@ -7339,11 +8106,7 @@ async function exportTaxSummaryPDF() {
   for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);
     // Thin accent line at bottom
-    doc.setDrawColor(...hexToRgb(colors.accent));
-    doc.setLineWidth(0.5);
-    doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-    doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-    doc.text(`${company.name} | Tax Summary ${year} | Page ${p} of ${totalPages}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+    pdfDrawFooter(doc, theme, company);
   }
 
   doc.save(`Tax-Summary-${year}.pdf`);
@@ -7460,9 +8223,9 @@ async function exportTestReportPDF() {
   doc.setFontSize(8);
 
   let overallText = 'PASS';
-  let overallColor = [34, 197, 94];
-  if (report.overallResult === 'fail') { overallText = 'FAIL'; overallColor = [239, 68, 68]; }
-  else if (report.overallResult === 'investigate') { overallText = 'INVESTIGATE'; overallColor = [245, 158, 11]; }
+  let overallColor = pdfDarkMode ? [34, 197, 94] : [22, 163, 74];
+  if (report.overallResult === 'fail') { overallText = 'FAIL'; overallColor = pdfDarkMode ? [239, 68, 68] : [220, 38, 38]; }
+  else if (report.overallResult === 'investigate') { overallText = 'INVESTIGATE'; overallColor = pdfDarkMode ? [245, 158, 11] : [180, 110, 0]; }
 
   const infoRows = [
     ['Title:', report.title],
@@ -7607,6 +8370,7 @@ async function exportTestReportPDF() {
         }
       },
       theme: 'plain',
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
 
     y = doc.lastAutoTable.finalY + 3;
@@ -7746,9 +8510,9 @@ async function exportCompiledTestReportsPDF(jobId) {
 
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
   allReports.forEach(function(r, idx) {
-    let resultText = 'PASS', resultColor = [34, 197, 94];
-    if (r.overallResult === 'fail') { resultText = 'FAIL'; resultColor = [239, 68, 68]; }
-    else if (r.overallResult === 'investigate') { resultText = 'INVESTIGATE'; resultColor = [245, 158, 11]; }
+    let resultText = 'PASS', resultColor = pdfDarkMode ? [34, 197, 94] : [22, 163, 74];
+    if (r.overallResult === 'fail') { resultText = 'FAIL'; resultColor = pdfDarkMode ? [239, 68, 68] : [220, 38, 38]; }
+    else if (r.overallResult === 'investigate') { resultText = 'INVESTIGATE'; resultColor = pdfDarkMode ? [245, 158, 11] : [180, 110, 0]; }
     doc.setTextColor(...textColor);
     doc.text((idx + 1) + '.  ' + sanitizePdfText(r.reportNumber) + ' — ' + sanitizePdfText(r.title || r.equipmentTested || 'Untitled'), leftCol, y);
     doc.setTextColor(...resultColor);
@@ -7771,9 +8535,9 @@ async function exportCompiledTestReportsPDF(jobId) {
     doc.text('REPORT DETAILS', leftCol, y); y += 5;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
 
-    let overallText = 'PASS', overallColor = [34, 197, 94];
-    if (report.overallResult === 'fail') { overallText = 'FAIL'; overallColor = [239, 68, 68]; }
-    else if (report.overallResult === 'investigate') { overallText = 'INVESTIGATE'; overallColor = [245, 158, 11]; }
+    let overallText = 'PASS', overallColor = pdfDarkMode ? [34, 197, 94] : [22, 163, 74];
+    if (report.overallResult === 'fail') { overallText = 'FAIL'; overallColor = pdfDarkMode ? [239, 68, 68] : [220, 38, 38]; }
+    else if (report.overallResult === 'investigate') { overallText = 'INVESTIGATE'; overallColor = pdfDarkMode ? [245, 158, 11] : [180, 110, 0]; }
 
     const infoRows = [
       ['Title:', report.title],
@@ -7869,6 +8633,7 @@ async function exportCompiledTestReportsPDF(jobId) {
           }
         },
         theme: 'plain',
+        didDrawPage: pdfAutoTablePageHook(theme),
       });
       y = doc.lastAutoTable.finalY + 3;
 
@@ -8794,17 +9559,17 @@ function exportCompliancePackagePDF() {
   y += 5;
 
   doc.setFontSize(10);
-  doc.setTextColor(100);
+  doc.setTextColor(...hexToRgb(colors.textSecondary));
   doc.text('Generated: ' + new Date().toLocaleDateString(), 15, y);
   doc.text('Total Active Certifications: ' + activeCerts.length, pageWidth - 15, y, { align: 'right' });
   y += 8;
 
   // Table header
   const cols = [15, 55, 85, 115, 145, pageWidth - 15];
-  doc.setFillColor(theme.headerBg[0], theme.headerBg[1], theme.headerBg[2]);
+  doc.setFillColor(...hexToRgb(colors.accent));
   doc.rect(15, y, pageWidth - 30, 8, 'F');
   doc.setFontSize(8);
-  doc.setTextColor(255);
+  doc.setTextColor(...(isLightColor(colors.accent) ? [30, 30, 30] : [255, 255, 255]));
   doc.text('Technician', 17, y + 5.5);
   doc.text('Certification', 57, y + 5.5);
   doc.text('Issuing Body', 87, y + 5.5);
@@ -8813,37 +9578,34 @@ function exportCompliancePackagePDF() {
   doc.text('Status', pageWidth - 17, y + 5.5, { align: 'right' });
   y += 10;
 
-  doc.setTextColor(50);
+  doc.setTextColor(...hexToRgb(colors.text));
   activeCerts.forEach((c, i) => {
     if (y > 250) {
-      // Thin accent line at bottom
-      doc.setDrawColor(200, 30, 30);
-      doc.setLineWidth(0.5);
-      doc.line(15, 267, pageWidth - 15, 267);
+      pdfDrawFooter(doc, theme, company);
       doc.addPage();
+      doc.setFillColor(...hexToRgb(colors.bg));
+      doc.rect(0, 0, pageWidth, pageHeight, 'F');
       y = 20;
     }
     if (i % 2 === 0) {
-      doc.setFillColor(245, 245, 245);
+      doc.setFillColor(...hexToRgb(colors.tableAlt));
       doc.rect(15, y - 3, pageWidth - 30, 7, 'F');
     }
     doc.setFontSize(8);
+    doc.setTextColor(...hexToRgb(colors.text));
     doc.text(c.techName.substring(0, 20), 17, y + 1);
     doc.text(c.name.substring(0, 15), 57, y + 1);
     doc.text((c.issuingBody || '').substring(0, 15), 87, y + 1);
     doc.text((c.certNumber || '').substring(0, 15), 117, y + 1);
     doc.text(c.expirationDate ? formatDateShort(c.expirationDate) : 'No Expiry', 147, y + 1);
-    const stColor = c.status.status === 'expiring-soon' ? [245, 158, 11] : [34, 197, 94];
+    const stColor = c.status.status === 'expiring-soon' ? (pdfDarkMode ? [245, 158, 11] : [180, 110, 0]) : (pdfDarkMode ? [34, 197, 94] : [22, 163, 74]);
     doc.setTextColor(stColor[0], stColor[1], stColor[2]);
     doc.text(c.status.label, pageWidth - 17, y + 1, { align: 'right' });
-    doc.setTextColor(50);
+    doc.setTextColor(...hexToRgb(colors.text));
     y += 7;
   });
 
-  // Bottom accent line
-  doc.setDrawColor(200, 30, 30);
-  doc.setLineWidth(0.5);
-  doc.line(15, 267, pageWidth - 15, 267);
+  pdfDrawFooter(doc, theme, company);
 
   doc.save('Compliance-Package-' + new Date().toISOString().split('T')[0] + '.pdf');
   showToast('Compliance package exported!');
@@ -10791,10 +11553,10 @@ function calculateKPIMetrics(month, year) {
   const grossMargin = totalEstRevenue > 0 ? ((totalEstRevenue - totalEstCost) / totalEstRevenue * 100) : 0;
   
   const periodTimesheets = timesheets.filter(t => (t.date || '').startsWith(periodKey));
-  const periodHours = periodTimesheets.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
+  const periodHours = periodTimesheets.reduce((s, t) => s + getTimesheetTotalHours(t), 0);
   const periodLaborCost = periodTimesheets.reduce((s, t) => s + (t.totalCost || 0), 0);
   
-  const totalBillableHours = timesheets.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
+  const totalBillableHours = timesheets.reduce((s, t) => s + getTimesheetTotalHours(t), 0);
   const totalRevenue = invoices.reduce((s, i) => s + (i.total || 0), 0);
   const effectiveBillableRate = totalBillableHours > 0 ? totalRevenue / totalBillableHours : 0;
   
@@ -10806,7 +11568,7 @@ function calculateKPIMetrics(month, year) {
   const outstandingAmount = outstandingInvoices.reduce((s, i) => s + (i.total || 0), 0);
   const outstandingCount = outstandingInvoices.length;
   
-  const totalAvailableHours = periodTimesheets.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0) + (t.hoursTravel || 0), 0);
+  const totalAvailableHours = periodTimesheets.reduce((s, t) => s + getTimesheetTotalHours(t), 0);
   const utilizationRate = totalAvailableHours > 0 ? (periodHours / totalAvailableHours * 100) : 0;
   
   const activeJobs = jobs.filter(j => j.status === 'in-progress' || j.status === 'estimate');
@@ -10942,22 +11704,35 @@ function exportKPIDashboardPDF() {
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 20;
   
-  pdfAddHeader(doc, theme, company, 'KPI Dashboard - ' + period, '', pageW);
+  const colors = theme.colors;
+  doc.setFillColor(...hexToRgb(colors.bg));
+  doc.rect(0, 0, pageW, pageH, 'F');
+  pdfAddHeader(doc, theme, company, 'KPI DASHBOARD', period, pageW);
   
   let y = 50;
   
   function addSection(title, items) {
-    if (y > pageH - 60) { doc.addPage(); y = 30; }
+    if (y > pageH - 60) {
+      doc.addPage();
+      doc.setFillColor(...hexToRgb(colors.bg));
+      doc.rect(0, 0, pageW, pageH, 'F');
+      y = 30;
+    }
     doc.setFontSize(12);
-    doc.setTextColor(70, 130, 180);
+    doc.setTextColor(...hexToRgb(colors.accent));
     doc.setFont('helvetica', 'bold');
     doc.text(title, margin, y);
     y += 7;
     doc.setFontSize(9);
-    doc.setTextColor(40, 40, 40);
+    doc.setTextColor(...hexToRgb(colors.text));
     doc.setFont('helvetica', 'normal');
     items.forEach(item => {
-      if (y > pageH - 25) { doc.addPage(); y = 30; }
+      if (y > pageH - 25) {
+        doc.addPage();
+        doc.setFillColor(...hexToRgb(colors.bg));
+        doc.rect(0, 0, pageW, pageH, 'F');
+        y = 30;
+      }
       doc.text(item[0] + ':', margin, y);
       doc.setFont('helvetica', 'bold');
       doc.text(item[1], margin + 60, y);
@@ -11008,11 +11783,11 @@ function exportKPIDashboardPDF() {
   const totalPages = doc.internal.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
-    doc.setDrawColor(200, 30, 30);
+    doc.setDrawColor(...hexToRgb(colors.accent));
     doc.setLineWidth(0.5);
     doc.line(margin, pageH - 18, pageW - margin, pageH - 18);
     doc.setFontSize(8);
-    doc.setTextColor(120, 120, 120);
+    doc.setTextColor(...hexToRgb(colors.textSecondary));
     doc.text('Page ' + i + ' of ' + totalPages, pageW - margin, pageH - 12, { align: 'right' });
     doc.text(company.name + ' | KPI Dashboard', margin, pageH - 12);
   }
@@ -11417,13 +12192,12 @@ async function exportWorkOrderPDF() {
 
   // Meta info
   doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  let metaText = `Date: ${formatDate(data.date)}`;
-  if (data.scheduledStart) metaText += `  |  Start: ${formatDate(data.scheduledStart)}`;
-  if (data.scheduledEnd) metaText += `  |  End: ${formatDate(data.scheduledEnd)}`;
-  if (data.assignedTech) metaText += `  |  Tech: ${data.assignedTech}`;
-  metaText += `  |  Priority: ${data.priority.toUpperCase()}`;
-  metaText += `  |  Status: ${data.status.toUpperCase()}`;
-  doc.text(metaText, 15, y); y += 8;
+  y = pdfDrawMeta(doc, [
+    `Date: ${formatDate(data.date)}`,
+    data.scheduledStart ? `Start: ${formatDate(data.scheduledStart)}` : '',
+    data.scheduledEnd ? `End: ${formatDate(data.scheduledEnd)}` : '',
+    data.assignedTech ? `Tech: ${data.assignedTech}` : ''
+  ], 15, y, pageWidth - 30, theme);
 
   // Customer
   doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
@@ -11467,6 +12241,7 @@ async function exportWorkOrderPDF() {
       alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
       bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
       columnStyles: { 0: { cellWidth: 12 }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 6;
 
@@ -11498,10 +12273,7 @@ async function exportWorkOrderPDF() {
   }
 
   // Footer
-  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  pdfDrawFooter(doc, theme, company);
 
   doc.save(`${data.docNumber || 'WorkOrder'}.pdf`);
   showToast('Work order PDF exported!');
@@ -11707,12 +12479,11 @@ async function exportChangeOrderPDF() {
 
   // Meta
   doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  let metaText = `Date: ${formatDate(data.date)}`;
-  metaText += `  |  Status: ${data.status.toUpperCase().replace('-', ' ')}`;
-  if (data.scheduleImpact) metaText += `  |  Schedule Impact: ${data.scheduleImpact}`;
-  if (data.approvedBy) metaText += `  |  Approved By: ${data.approvedBy}`;
-  if (data.approvedDate) metaText += ` on ${formatDate(data.approvedDate)}`;
-  doc.text(metaText, 15, y); y += 8;
+  y = pdfDrawMeta(doc, [
+    `Date: ${formatDate(data.date)}`,
+    data.scheduleImpact ? `Schedule Impact: ${data.scheduleImpact}` : '',
+    data.approvedBy ? `Approved By: ${data.approvedBy}` : ''
+  ], 15, y, pageWidth - 30, theme);
 
   // Customer
   doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
@@ -11782,6 +12553,7 @@ async function exportChangeOrderPDF() {
       alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
       bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
       columnStyles: { 0: { cellWidth: 12 }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 6;
 
@@ -11810,10 +12582,7 @@ async function exportChangeOrderPDF() {
   doc.line(145, y, pageWidth - 15, y);
 
   // Footer
-  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  pdfDrawFooter(doc, theme, company);
 
   doc.save(`${data.docNumber || 'ChangeOrder'}.pdf`);
   showToast('Change order PDF exported!');
@@ -12074,10 +12843,11 @@ async function exportProposalPDF() {
   let y = pdfAddHeader(doc, theme, company, 'PROPOSAL', data.docNumber, pageWidth);
 
   doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  let metaText = `Date: ${formatDate(data.date)}`;
-  if (data.validUntil) metaText += `  |  Valid Until: ${formatDate(data.validUntil)}`;
-  if (data.projectName) metaText += `  |  Project: ${data.projectName}`;
-  doc.text(metaText, 15, y); y += 8;
+  y = pdfDrawMeta(doc, [
+    `Date: ${formatDate(data.date)}`,
+    data.validUntil ? `Valid Until: ${formatDate(data.validUntil)}` : '',
+    data.projectName ? `Project: ${data.projectName}` : ''
+  ], 15, y, pageWidth - 30, theme);
 
   // Customer
   doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
@@ -12154,6 +12924,7 @@ async function exportProposalPDF() {
     alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
     bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
     columnStyles: { 0: { cellWidth: 12 }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+    didDrawPage: pdfAutoTablePageHook(theme),
   });
   y = doc.lastAutoTable.finalY + 6;
 
@@ -12183,10 +12954,7 @@ async function exportProposalPDF() {
   }
 
   // Footer
-  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  pdfDrawFooter(doc, theme, company);
 
   doc.save(`${data.docNumber || 'Proposal'}.pdf`);
   showToast('Proposal PDF exported!');
@@ -12378,10 +13146,10 @@ async function exportCreditMemoPDF() {
   let y = pdfAddHeader(doc, theme, company, 'CREDIT MEMO', data.docNumber, pageWidth);
 
   doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  let metaText = `Date: ${formatDate(data.date)}`;
-  if (data.relatedInvoice) metaText += `  |  Related Invoice: ${data.relatedInvoice}`;
-  metaText += `  |  Status: ${data.status.toUpperCase()}`;
-  doc.text(metaText, 15, y); y += 8;
+  y = pdfDrawMeta(doc, [
+    `Date: ${formatDate(data.date)}`,
+    data.relatedInvoice ? `Related Invoice: ${data.relatedInvoice}` : ''
+  ], 15, y, pageWidth - 30, theme);
 
   // Customer
   doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
@@ -12424,6 +13192,7 @@ async function exportCreditMemoPDF() {
     alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
     bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
     columnStyles: { 0: { cellWidth: 12 }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+    didDrawPage: pdfAutoTablePageHook(theme),
   });
   y = doc.lastAutoTable.finalY + 6;
 
@@ -12433,10 +13202,7 @@ async function exportCreditMemoPDF() {
   doc.text(formatCurrency(data.total), pageWidth - 15, y + 2, { align: 'right' });
 
   // Footer
-  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  pdfDrawFooter(doc, theme, company);
 
   doc.save(`${data.docNumber || 'CreditMemo'}.pdf`);
   showToast('Credit memo PDF exported!');
@@ -12583,11 +13349,11 @@ async function exportPaymentReceiptPDF() {
   let y = pdfAddHeader(doc, theme, company, 'PAYMENT RECEIPT', data.docNumber, pageWidth);
 
   doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  let metaText = `Date: ${formatDate(data.date)}`;
-  if (data.relatedInvoice) metaText += `  |  Invoice: ${data.relatedInvoice}`;
-  metaText += `  |  Method: ${data.paymentMethod.toUpperCase().replace('-', ' ')}`;
-  if (data.referenceNumber) metaText += `  |  Ref: ${data.referenceNumber}`;
-  doc.text(metaText, 15, y); y += 8;
+  y = pdfDrawMeta(doc, [
+    `Date: ${formatDate(data.date)}`,
+    data.relatedInvoice ? `Invoice: ${data.relatedInvoice}` : '',
+    data.referenceNumber ? `Ref: ${data.referenceNumber}` : ''
+  ], 15, y, pageWidth - 30, theme);
 
   // Customer
   doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
@@ -12627,6 +13393,7 @@ async function exportPaymentReceiptPDF() {
     bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
     alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
     columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } },
+    didDrawPage: pdfAutoTablePageHook(theme),
   });
   y = doc.lastAutoTable.finalY + 10;
 
@@ -12636,10 +13403,7 @@ async function exportPaymentReceiptPDF() {
   doc.text('Thank you for your payment.', pageWidth / 2, y, { align: 'center' });
 
   // Footer
-  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  pdfDrawFooter(doc, theme, company);
 
   doc.save(`${data.docNumber || 'Receipt'}.pdf`);
   showToast('Payment receipt PDF exported!');
@@ -12847,9 +13611,9 @@ async function exportStatementPDF() {
   let y = pdfAddHeader(doc, theme, company, 'STATEMENT OF ACCOUNT', data.docNumber, pageWidth);
 
   doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  let metaText = `Date: ${formatDate(data.date)}`;
-  if (data.periodStart && data.periodEnd) metaText += `  |  Period: ${formatDate(data.periodStart)} — ${formatDate(data.periodEnd)}`;
-  doc.text(metaText, 15, y); y += 8;
+  y = pdfDrawMeta(doc, [
+    `Date: ${formatDate(data.date)}`
+  ], 15, y, pageWidth - 30, theme);
 
   // Customer
   doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
@@ -12887,6 +13651,7 @@ async function exportStatementPDF() {
     alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
     bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
     columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+    didDrawPage: pdfAutoTablePageHook(theme),
   });
   y = doc.lastAutoTable.finalY + 8;
 
@@ -12906,10 +13671,7 @@ async function exportStatementPDF() {
   doc.text('BALANCE DUE:', pageWidth - 80, y + 2); doc.text(formatCurrency(balanceDue), pageWidth - 15, y + 2, { align: 'right' });
 
   // Footer
-  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  pdfDrawFooter(doc, theme, company);
 
   doc.save(`${data.docNumber || 'Statement'}.pdf`);
   showToast('Statement PDF exported!');
@@ -13094,12 +13856,12 @@ async function exportContractPDF() {
   let y = pdfAddHeader(doc, theme, company, typeLabels[data.contractType] || 'CONTRACT', data.docNumber, pageWidth);
 
   doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  let metaText = `Date: ${formatDate(data.date)}`;
-  if (data.startDate) metaText += `  |  Start: ${formatDate(data.startDate)}`;
-  if (data.endDate) metaText += `  |  End: ${formatDate(data.endDate)}`;
-  if (data.paymentTerms) metaText += `  |  Payment: ${data.paymentTerms}`;
-  metaText += `  |  Status: ${data.status.toUpperCase()}`;
-  doc.text(metaText, 15, y); y += 8;
+  y = pdfDrawMeta(doc, [
+    `Date: ${formatDate(data.date)}`,
+    data.startDate ? `Start: ${formatDate(data.startDate)}` : '',
+    data.endDate ? `End: ${formatDate(data.endDate)}` : '',
+    data.paymentTerms ? `Payment: ${data.paymentTerms}` : ''
+  ], 15, y, pageWidth - 30, theme);
 
   // Parties
   doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
@@ -13195,10 +13957,7 @@ async function exportContractPDF() {
   doc.text('Date:', pageWidth/2 + 5, y); doc.line(pageWidth/2 + 30, y, pageWidth - 15, y);
 
   // Footer
-  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  pdfDrawFooter(doc, theme, company);
 
   doc.save(`${data.docNumber || 'Contract'}.pdf`);
   showToast('Contract PDF exported!');
@@ -13505,7 +14264,7 @@ function renderAssetTransferEditor(at) {
       </div>
       <div class="page-header-actions">
         <button class="btn btn-secondary" onclick="saveCurrentAT()">Save</button>
-        <button class="btn btn-primary" onclick="exportAssetTransferPDF()">Print Transfer Form</button>
+        <button class="btn btn-primary" onclick="exportAssetTransferPDF()">Export PDF</button>
       </div>
     </div>
     <div class="card">
@@ -13518,6 +14277,9 @@ function renderAssetTransferEditor(at) {
           <select class="form-select" id="at-direction">
             <option value="pickup" ${at.direction==='pickup'?'selected':''}>Pickup from Customer</option>
             <option value="delivery" ${at.direction==='delivery'?'selected':''}>Delivery to Customer</option>
+            <option value="company-to-customer" ${at.direction==='company-to-customer'?'selected':''}>Company to Customer</option>
+            <option value="customer-to-company" ${at.direction==='customer-to-company'?'selected':''}>Customer to Company</option>
+            <option value="internal" ${at.direction==='internal'?'selected':''}>Internal Transfer (Between Locations)</option>
           </select>
         </div>
         <div class="form-group"><label class="form-label">Status</label>
@@ -13560,7 +14322,7 @@ function renderAssetTransferEditor(at) {
     <div class="card">
       <div class="card-title"><div class="accent-bar"></div>Signed Transfer Document</div>
       <p style="color:var(--text-secondary);font-size:13px;margin-bottom:12px;">
-        Print the transfer form using "Print Transfer Form" above, get it signed by the customer, then upload the signed copy here.
+        Export the transfer form using "Export PDF" above, get it signed by the customer, then upload the signed copy here.
       </p>
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
         <label class="btn btn-secondary" style="cursor:pointer;">
@@ -13703,15 +14465,20 @@ async function exportAssetTransferPDF() {
   doc.setFillColor(...hexToRgb(colors.bg));
   doc.rect(0, 0, pageWidth, pageHeight, 'F');
 
-  const dirLabel = data.direction === 'pickup' ? 'EQUIPMENT PICKUP' : 'EQUIPMENT DELIVERY';
+  const dirLabels = {
+    'pickup': 'EQUIPMENT PICKUP',
+    'delivery': 'EQUIPMENT DELIVERY',
+    'company-to-customer': 'EQUIPMENT TRANSFER — COMPANY TO CUSTOMER',
+    'customer-to-company': 'EQUIPMENT TRANSFER — CUSTOMER TO COMPANY'
+  };
+  const dirLabel = dirLabels[data.direction] || 'EQUIPMENT TRANSFER';
   let y = pdfAddHeader(doc, theme, company, 'ASSET TRANSFER — ' + dirLabel, data.docNumber, pageWidth);
 
   doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  let metaText = `Date: ${formatDate(data.date)}`;
-  metaText += `  |  Direction: ${data.direction === 'pickup' ? 'Pickup from Customer' : 'Delivery to Customer'}`;
-  metaText += `  |  Status: ${data.status.toUpperCase().replace('-', ' ')}`;
-  if (data.expectedReturnDate) metaText += `  |  Expected Return: ${formatDate(data.expectedReturnDate)}`;
-  doc.text(metaText, 15, y); y += 8;
+  y = pdfDrawMeta(doc, [
+    `Date: ${formatDate(data.date)}`,
+    data.expectedReturnDate ? `Expected Return: ${formatDate(data.expectedReturnDate)}` : ''
+  ], 15, y, pageWidth - 30, theme);
 
   // Customer
   doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
@@ -13756,6 +14523,7 @@ async function exportAssetTransferPDF() {
       alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
       bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
       columnStyles: { 0: { cellWidth: 10 }, 3: { cellWidth: 15 } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   }
@@ -13769,9 +14537,12 @@ async function exportAssetTransferPDF() {
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
   doc.setTextColor(...hexToRgb(colors.text));
 
-  const ackText = data.direction === 'pickup'
-    ? `I acknowledge that the above equipment has been released to ${company.name} for the purpose described above. I understand that ${company.name} will exercise reasonable care in handling this equipment.`
-    : `I acknowledge receipt of the above equipment from ${company.name}. I confirm the items have been received in the condition noted above.`;
+  let ackText;
+  if (data.direction === 'pickup' || data.direction === 'customer-to-company') {
+    ackText = `I acknowledge that the above equipment has been released to ${company.name} for the purpose described above. I understand that ${company.name} will exercise reasonable care in handling this equipment.`;
+  } else {
+    ackText = `I acknowledge receipt of the above equipment from ${company.name}. I confirm the items have been received in the condition noted above.`;
+  }
   const ackLines = doc.splitTextToSize(ackText, pageWidth - 30);
   doc.text(ackLines, 15, y); y += ackLines.length * 4 + 8;
 
@@ -13780,7 +14551,8 @@ async function exportAssetTransferPDF() {
   doc.setFontSize(8); doc.setTextColor(...hexToRgb(colors.textSecondary));
 
   doc.setFont('helvetica', 'bold');
-  doc.text(data.direction === 'pickup' ? 'RELEASED BY (Customer):' : 'RECEIVED BY (Customer):', 15, y); y += 8;
+  const isFromCustomer = (data.direction === 'pickup' || data.direction === 'customer-to-company');
+  doc.text(isFromCustomer ? 'RELEASED BY (Customer):' : 'RECEIVED BY (Customer):', 15, y); y += 8;
   doc.setFont('helvetica', 'normal');
   doc.text('Signature:', 15, y); doc.line(40, y, 120, y);
   doc.text('Date:', 130, y); doc.line(145, y, pageWidth - 15, y); y += 8;
@@ -13788,7 +14560,7 @@ async function exportAssetTransferPDF() {
   doc.text('Title:', 130, y); doc.line(145, y, pageWidth - 15, y); y += 12;
 
   doc.setFont('helvetica', 'bold');
-  doc.text(data.direction === 'pickup' ? 'PICKED UP BY (Technician):' : 'DELIVERED BY (Technician):', 15, y); y += 8;
+  doc.text(isFromCustomer ? 'PICKED UP BY (Technician):' : 'DELIVERED BY (Technician):', 15, y); y += 8;
   doc.setFont('helvetica', 'normal');
   doc.text('Signature:', 15, y); doc.line(40, y, 120, y);
   doc.text('Date:', 130, y); doc.line(145, y, pageWidth - 15, y); y += 8;
@@ -13800,13 +14572,10 @@ async function exportAssetTransferPDF() {
   }
 
   // Footer
-  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  pdfDrawFooter(doc, theme, company);
 
   doc.save(`${data.docNumber || 'AssetTransfer'}.pdf`);
-  showToast('Asset transfer form exported! Print and get it signed.');
+  showToast('Asset transfer form exported! Get it signed by the customer.');
 }
 
 function editAssetTransfer(id) {
@@ -14025,10 +14794,11 @@ async function exportSafetyReportPDF() {
   let y = pdfAddHeader(doc, theme, company, 'JOB SAFETY ANALYSIS', data.docNumber, pageWidth);
 
   doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  let metaText = `Date: ${formatDate(data.date)}`;
-  if (data.projectName) metaText += `  |  Project: ${data.projectName}`;
-  if (data.location) metaText += `  |  Location: ${data.location}`;
-  doc.text(metaText, 15, y); y += 4;
+  y = pdfDrawMeta(doc, [
+    `Date: ${formatDate(data.date)}`,
+    data.projectName ? `Project: ${data.projectName}` : '',
+    data.location ? `Location: ${data.location}` : ''
+  ], 15, y, pageWidth - 30, theme);
   if (data.preparedBy || data.reviewedBy) {
     let meta2 = '';
     if (data.preparedBy) meta2 += `Prepared By: ${data.preparedBy}`;
@@ -14039,7 +14809,9 @@ async function exportSafetyReportPDF() {
 
   // Hazard analysis table
   if (data.hazards && data.hazards.length > 0) {
-    const riskColors = { low: '#22c55e', medium: '#eab308', high: '#f97316', critical: '#ef4444' };
+    const riskColors = pdfDarkMode
+      ? { low: '#22c55e', medium: '#eab308', high: '#f97316', critical: '#ef4444' }
+      : { low: '#16a34a', medium: '#a16207', high: '#c2410c', critical: '#dc2626' };
     const tableHead = [['Step', 'Job Step', 'Hazard', 'Risk', 'Controls', 'PPE']];
     const tableBody = data.hazards.map((h, i) => [
       String(i + 1), h.step || '', h.hazard || '',
@@ -14060,6 +14832,7 @@ async function exportSafetyReportPDF() {
           if (riskColors[risk]) data.cell.styles.textColor = hexToRgb(riskColors[risk]);
         }
       },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   }
@@ -14096,10 +14869,7 @@ async function exportSafetyReportPDF() {
   }
 
   // Footer
-  doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.5);
-  doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
-  doc.setFontSize(7); doc.setTextColor(...hexToRgb(colors.textSecondary));
-  doc.text(`${company.name} | ${company.website}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
+  pdfDrawFooter(doc, theme, company);
 
   doc.save(`${data.docNumber || 'SafetyReport'}.pdf`);
   showToast('Safety report PDF exported!');
@@ -14708,16 +15478,13 @@ async function exportYearEndTaxPackagePDF() {
 
   function checkPage(needed) {
     if (y + needed > pageHeight - 20) {
-      doc.setDrawColor(...hexToRgb(colors.accent));
-      doc.setLineWidth(0.5);
-      doc.line(15, pageHeight - 10, pageWidth - 15, pageHeight - 10);
+      pdfDrawFooter(doc, theme, company);
       doc.addPage();
       doc.setFillColor(...hexToRgb(colors.bg));
       doc.rect(0, 0, pageWidth, pageHeight, 'F');
       y = 15;
     }
   }
-
   function sectionTitle(title) {
     checkPage(15);
     doc.setFontSize(10); doc.setFont('helvetica', 'bold');
@@ -14750,7 +15517,7 @@ async function exportYearEndTaxPackagePDF() {
   doc.text(`Revenue: ${formatCurrency(totalRevenue)}`, ml, y);
   doc.text(`Expenses: ${formatCurrency(totalExpenses)}`, ml + 45, y);
   doc.text(`Depreciation: ${formatCurrency(totalDepreciation)}`, ml + 90, y);
-  const netColor = netIncome >= 0 ? [34, 197, 94] : [239, 68, 68];
+  const netColor = netIncome >= 0 ? (pdfDarkMode ? [34, 197, 94] : [22, 163, 74]) : (pdfDarkMode ? [239, 68, 68] : [220, 38, 38]);
   doc.setTextColor(...netColor);
   doc.text(`Net: ${formatCurrency(netIncome)}`, pageWidth - mr, y, { align: 'right' });
   doc.setTextColor(...hexToRgb(colors.text));
@@ -14771,6 +15538,7 @@ async function exportYearEndTaxPackagePDF() {
     foot: [['Total Expenses', '- ' + formatCurrency(totalExpenses)], ['Net ' + (netIncome >= 0 ? 'Income' : 'Loss'), formatCurrency(netIncome)]],
     styles: tblStyles, headStyles, footStyles, alternateRowStyles: altStyles,
     columnStyles: { 1: { halign: 'right' } },
+    didDrawPage: pdfAutoTablePageHook(theme),
   });
   y = doc.lastAutoTable.finalY + 8;
 
@@ -14787,6 +15555,7 @@ async function exportYearEndTaxPackagePDF() {
       foot: [['Total', String(invoices.length), formatCurrency(totalRevenue)]],
       styles: tblStyles, headStyles, footStyles, alternateRowStyles: altStyles,
       columnStyles: { 1: { halign: 'center' }, 2: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   } else { doc.setFontSize(7); doc.text('No revenue recorded.', ml, y); y += 8; }
@@ -14806,6 +15575,7 @@ async function exportYearEndTaxPackagePDF() {
       body: expRows,
       styles: tblStyles, headStyles, alternateRowStyles: altStyles,
       columnStyles: { 1: { halign: 'center' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   } else { doc.setFontSize(7); doc.text('No expenses recorded.', ml, y); y += 8; }
@@ -14820,6 +15590,7 @@ async function exportYearEndTaxPackagePDF() {
       foot: [['', '', '', 'Total', totalMileage.toFixed(0), formatCurrency(totalMileageCost)]],
       styles: tblStyles, headStyles, footStyles, alternateRowStyles: altStyles,
       columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   } else { doc.setFontSize(7); doc.text('No mileage recorded.', ml, y); y += 8; }
@@ -14839,6 +15610,7 @@ async function exportYearEndTaxPackagePDF() {
       foot: [['', '', '', '', 'Total', formatCurrency(unpaid.reduce((s,i)=>s+(i.total||0),0))]],
       styles: tblStyles, headStyles, footStyles, alternateRowStyles: altStyles,
       columnStyles: { 4: { halign: 'center' }, 5: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   } else { doc.setFontSize(7); doc.text('No outstanding invoices.', ml, y); y += 8; }
@@ -14856,6 +15628,7 @@ async function exportYearEndTaxPackagePDF() {
       foot: [['', '', '', 'Total', formatCurrency(totalPOs)]],
       styles: tblStyles, headStyles, footStyles, alternateRowStyles: altStyles,
       columnStyles: { 4: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   } else { doc.setFontSize(7); doc.text('No purchase orders for this year.', ml, y); y += 8; }
@@ -14870,6 +15643,7 @@ async function exportYearEndTaxPackagePDF() {
       foot: [['', '', '', '', 'Total', formatCurrency(totalDepreciation), '', '']],
       styles: { ...tblStyles, fontSize: 6.5 }, headStyles, footStyles, alternateRowStyles: altStyles,
       columnStyles: { 2: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   } else { doc.setFontSize(7); doc.text('No depreciable equipment.', ml, y); y += 8; }
@@ -14892,7 +15666,8 @@ async function exportYearEndTaxPackagePDF() {
           data.cell.styles.textColor = [239, 68, 68];
           data.cell.styles.fontStyle = 'bold';
         }
-      }
+      },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   } else { doc.setFontSize(7); doc.text('No subcontractor payments recorded.', ml, y); y += 8; }
@@ -14907,6 +15682,7 @@ async function exportYearEndTaxPackagePDF() {
       foot: [['Total', '', formatCurrency(totalFederalTax), formatCurrency(totalStateTax), formatCurrency(totalFederalTax + totalStateTax), '']],
       styles: tblStyles, headStyles, footStyles, alternateRowStyles: altStyles,
       columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   } else { doc.setFontSize(7); doc.text('No quarterly tax payments recorded.', ml, y); y += 8; }
@@ -14956,14 +15732,13 @@ async function exportYearEndTaxPackagePDF() {
 function showBulkTimesheetEntry() {
   const main = document.querySelector('.main-content');
   const jobs = getJobs();
-  const empTypes = getEmployeeTypes();
-  const company = getCompany();
+  const rs = getRateSheet();
+  const laborRates = rs.laborRates || [];
   if (!window._bulkTimesheets) {
     window._bulkTimesheets = [{
-      employeeName: '', employeeType: '', jobId: '', date: todayStr(),
-      hoursRegular: 0, hoursOvertime: 0, hoursTravel: 0,
-      rateRegular: company.regularRate, rateOvertime: company.overtimeRate, rateTravel: company.travelRate,
-      description: ''
+      technicianName: '', jobId: '', date: todayStr(),
+      hourType: 'straight', hours: 0,
+      description: '', workReasons: []
     }];
   }
   main.innerHTML = `
@@ -14978,12 +15753,12 @@ function showBulkTimesheetEntry() {
       </div>
     </div>
     <div class="card">
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Enter multiple timesheet entries at once. Each row creates a separate timesheet entry.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Enter multiple time entries at once. Rows with the same Job + Date will be grouped into a single timesheet. No dollar amounts — only hours and types.</p>
       <div class="table-scroll">
         <table class="line-items-table">
           <thead><tr>
-            <th>Employee</th><th>Type</th><th>Job</th><th>Date</th>
-            <th>Reg Hrs</th><th>OT Hrs</th><th>Travel</th><th>Description</th><th></th>
+            <th>Technician</th><th>Job</th><th>Date</th>
+            <th>Hour Type</th><th>Hours</th><th>Description</th><th></th>
           </tr></thead>
           <tbody id="bulk-ts-body"></tbody>
         </table>
@@ -14997,140 +15772,191 @@ function renderBulkTimesheetRows() {
   const tbody = document.getElementById('bulk-ts-body');
   if (!tbody) return;
   const jobs = getJobs();
-  const empTypes = getEmployeeTypes();
-  tbody.innerHTML = window._bulkTimesheets.map((row, i) => `
+  const rs = getRateSheet();
+  const laborRates = rs.laborRates || [];
+  const rosterNames = getEmployeeRosterNames();
+  tbody.innerHTML = window._bulkTimesheets.map((row, i) => {
+    const isCustom = row.technicianName && !rosterNames.find(e => e.name === row.technicianName);
+    return `
     <tr>
-      <td><input class="form-input" value="${escapeHtml(row.employeeName)}" placeholder="Name" onchange="window._bulkTimesheets[${i}].employeeName=this.value;"></td>
-      <td><select class="form-select" onchange="window._bulkTimesheets[${i}].employeeType=this.value; applyBulkEmpTypeRate(${i});">
-        <option value="">\u2014</option>
-        ${empTypes.map(t => '<option value="' + t.id + '"' + (row.employeeType === t.id ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>').join('')}
-      </select></td>
-      <td><select class="form-select" onchange="window._bulkTimesheets[${i}].jobId=this.value;">
+      <td><select class="form-select" style="font-size:12px;" onchange="onBulkEmpSelect(${i}, this.value)">
+        <option value="">\u2014 Select \u2014</option>
+        ${rosterNames.map(e => '<option value="' + escapeHtml(e.name) + '"' + (row.technicianName === e.name ? ' selected' : '') + '>' + escapeHtml(e.name) + (e.classification === '1099' ? ' (1099)' : '') + '</option>').join('')}
+        <option value="__custom__"${isCustom ? ' selected' : ''}>\u2014 Custom \u2014</option>
+      </select>
+      ${isCustom ? '<input class="form-input" value="' + escapeHtml(row.technicianName) + '" placeholder="Name" style="margin-top:4px;font-size:12px;" onchange="window._bulkTimesheets[' + i + '].technicianName=this.value;">' : ''}
+      </td>
+      <td><select class="form-select" style="font-size:12px;" onchange="window._bulkTimesheets[${i}].jobId=this.value;">
         <option value="">\u2014</option>
         ${jobs.map(j => '<option value="' + j.id + '"' + (row.jobId === j.id ? ' selected' : '') + '>' + escapeHtml(j.jobNumber) + '</option>').join('')}
       </select></td>
-      <td><input class="form-input" type="date" value="${row.date}" onchange="window._bulkTimesheets[${i}].date=this.value;"></td>
-      <td><input class="form-input" type="number" value="${row.hoursRegular}" min="0" step="0.25" style="width:70px;" onchange="window._bulkTimesheets[${i}].hoursRegular=parseFloat(this.value)||0;"></td>
-      <td><input class="form-input" type="number" value="${row.hoursOvertime}" min="0" step="0.25" style="width:70px;" onchange="window._bulkTimesheets[${i}].hoursOvertime=parseFloat(this.value)||0;"></td>
-      <td><input class="form-input" type="number" value="${row.hoursTravel}" min="0" step="0.25" style="width:70px;" onchange="window._bulkTimesheets[${i}].hoursTravel=parseFloat(this.value)||0;"></td>
-      <td><input class="form-input" value="${escapeHtml(row.description)}" placeholder="Work done" onchange="window._bulkTimesheets[${i}].description=this.value;"></td>
+      <td><input class="form-input" type="date" value="${row.date}" style="font-size:12px;" onchange="window._bulkTimesheets[${i}].date=this.value;"></td>
+      <td><select class="form-select" style="font-size:12px;" onchange="window._bulkTimesheets[${i}].hourType=this.value;">
+        ${laborRates.map(lr => '<option value="' + lr.id + '"' + (row.hourType === lr.id ? ' selected' : '') + '>' + escapeHtml(lr.name) + '</option>').join('')}
+      </select></td>
+      <td><input class="form-input" type="number" value="${row.hours || 0}" min="0" step="0.25" style="width:70px;font-size:12px;" onchange="window._bulkTimesheets[${i}].hours=parseFloat(this.value)||0;"></td>
+      <td><input class="form-input" value="${escapeHtml(row.description || '')}" placeholder="Work done" style="font-size:12px;" onchange="window._bulkTimesheets[${i}].description=this.value;"></td>
       <td><button class="delete-btn" onclick="window._bulkTimesheets.splice(${i},1); renderBulkTimesheetRows();">\u2715</button></td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
 function applyBulkEmpTypeRate(idx) {
+  // Legacy function — no longer needed for new format but kept for compatibility
+}
+
+function onBulkEmpSelect(idx, val) {
   const row = window._bulkTimesheets[idx];
-  if (!row || !row.employeeType) return;
-  const empType = getEmployeeTypeById(row.employeeType);
-  if (!empType) return;
-  const rs = getRateSheet();
-  const otRate = (rs.laborRates.find(r => r.id === 'overtime') || {}).rate || 225;
-  const travelRate = (rs.laborRates.find(r => r.id === 'travel') || {}).rate || 150;
-  const straightRate = (rs.laborRates.find(r => r.id === 'straight') || {}).rate || 150;
-  const ratio = empType.defaultRate / straightRate;
-  row.rateRegular = empType.defaultRate;
-  row.rateOvertime = Math.round(otRate * ratio * 100) / 100;
-  row.rateTravel = Math.round(travelRate * ratio * 100) / 100;
+  if (!row) return;
+  if (val === '__custom__') {
+    row.technicianName = '';
+    renderBulkTimesheetRows();
+    return;
+  }
+  row.technicianName = val;
+  renderBulkTimesheetRows();
 }
 
 function addBulkTimesheetRow() {
-  const company = getCompany();
   const lastRow = window._bulkTimesheets[window._bulkTimesheets.length - 1];
   window._bulkTimesheets.push({
-    employeeName: lastRow ? lastRow.employeeName : '',
-    employeeType: lastRow ? lastRow.employeeType : '',
+    technicianName: lastRow ? lastRow.technicianName : '',
     jobId: lastRow ? lastRow.jobId : '',
     date: lastRow ? lastRow.date : todayStr(),
-    hoursRegular: 0, hoursOvertime: 0, hoursTravel: 0,
-    rateRegular: lastRow ? lastRow.rateRegular : company.regularRate,
-    rateOvertime: lastRow ? lastRow.rateOvertime : company.overtimeRate,
-    rateTravel: lastRow ? lastRow.rateTravel : company.travelRate,
-    description: ''
+    hourType: lastRow ? lastRow.hourType : 'straight',
+    hours: 0,
+    description: '', workReasons: []
   });
   renderBulkTimesheetRows();
 }
 
 function saveBulkTimesheets() {
-  let count = 0;
+  // Group bulk rows by job+date to create combined timesheets
+  const groups = {};
   window._bulkTimesheets.forEach(row => {
-    if (!row.employeeName && !row.hoursRegular && !row.hoursOvertime) return;
+    if (!row.technicianName && !row.hours) return;
+    const key = (row.jobId || 'none') + '|' + (row.date || todayStr());
+    if (!groups[key]) groups[key] = { jobId: row.jobId || '', date: row.date || todayStr(), rows: [] };
+    groups[key].rows.push({
+      rowId: generateId(),
+      technicianName: row.technicianName || '',
+      hourType: row.hourType || 'straight',
+      hours: row.hours || 0,
+      description: row.description || '',
+      workReasons: row.workReasons || [],
+    });
+  });
+
+  let count = 0;
+  const roster = getEmployeeRoster();
+  Object.values(groups).forEach(g => {
+    if (g.rows.length === 0) return;
+    // Compute internal cost using employee pay rates with hour-type multipliers
+    let totalCost = 0;
+    g.rows.forEach(r => {
+      const emp = roster.find(e => e.name === r.technicianName);
+      const basePayRate = emp ? (emp.payRate || 0) : 0;
+      const effectiveRate = getEmployeeEffectivePayRate(basePayRate, r.hourType);
+      totalCost += effectiveRate * (r.hours || 0);
+    });
+    const techs = [...new Set(g.rows.map(r => r.technicianName).filter(Boolean))];
     const ts = {
-      id: generateId(), jobId: row.jobId || '', date: row.date || todayStr(),
-      employeeName: row.employeeName, employeeType: row.employeeType || '',
-      description: row.description,
-      hoursRegular: row.hoursRegular || 0, hoursOvertime: row.hoursOvertime || 0, hoursTravel: row.hoursTravel || 0,
-      rateRegular: row.rateRegular || 0, rateOvertime: row.rateOvertime || 0, rateTravel: row.rateTravel || 0,
-      totalCost: (row.hoursRegular * row.rateRegular) + (row.hoursOvertime * row.rateOvertime) + (row.hoursTravel * row.rateTravel),
+      id: generateId(), jobId: g.jobId, date: g.date, dateEnd: '',
+      poNumber: '', woNumber: '', foreman: '',
+      rows: g.rows,
+      employeeName: techs.join(', '),
+      description: g.rows.map(r => r.description).filter(Boolean).join('; '),
+      hoursRegular: g.rows.filter(r => r.hourType === 'straight').reduce((s, r) => s + (r.hours || 0), 0),
+      hoursOvertime: g.rows.filter(r => r.hourType === 'overtime').reduce((s, r) => s + (r.hours || 0), 0),
+      hoursTravel: g.rows.filter(r => r.hourType === 'travel').reduce((s, r) => s + (r.hours || 0), 0),
+      totalCost: totalCost,
       notes: '',
     };
     saveDocument('timesheets', ts);
     count++;
   });
   window._bulkTimesheets = null;
-  showToast(count + ' timesheet entries saved!', 'success');
+  showToast(count + ' timesheet(s) saved!', 'success');
   showPage('timesheets');
 }
 
 // ============================================================
-// EMPLOYEE HR PAGE
+// EMPLOYEE HR PAGE — ROSTER-BASED SYSTEM
 // ============================================================
 function renderEmployeeHR() {
   const main = document.querySelector('.main-content');
+  const roster = getEmployeeRoster();
   const timesheets = getTimesheets();
   const empTypes = getEmployeeTypes();
-  const techs = getTechnicians();
+  const dismissed = JSON.parse(localStorage.getItem('psva_hr_dismissed') || '[]');
 
-  // Get unique employee names from timesheets
-  const employeeNames = [...new Set(timesheets.map(t => t.employeeName).filter(Boolean))];
-
-  // Calculate per-employee stats
-  const empStats = employeeNames.map(name => {
-    const entries = timesheets.filter(t => t.employeeName === name);
-    const totalHours = entries.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
+  // Build stats for each roster employee
+  const rosterStats = roster.map(emp => {
+    const entries = timesheets.filter(t => {
+      if (t.employeeRosterId === emp.id) return true;
+      if (t.employeeName === emp.name) return true;
+      // Also match new multi-row format where technician name is in rows
+      if (t.rows && t.rows.some(r => r.technicianName === emp.name)) return true;
+      return false;
+    });
+    const totalHours = entries.reduce((s, t) => s + getTimesheetTotalHours(t), 0);
     const totalTravel = entries.reduce((s, t) => s + (t.hoursTravel || 0), 0);
     const totalCost = entries.reduce((s, t) => s + (t.totalCost || 0), 0);
     const entryCount = entries.length;
-    const lastEntry = entries.sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
-    const empType = entries.find(e => e.employeeType)?.employeeType || '';
-    const empTypeInfo = empType ? empTypes.find(t => t.id === empType) : null;
+    const lastEntry = entries.length > 0 ? entries.sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0] : null;
+    const empTypeInfo = emp.employeeType ? empTypes.find(t => t.id === emp.employeeType) : null;
 
-    // Check for missing entries (gaps > 2 days in last 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const recentDates = entries.filter(e => new Date(e.date) >= thirtyDaysAgo).map(e => e.date).sort();
+    // Missing entries check for active employees
     let missingDays = 0;
-    if (recentDates.length > 0) {
-      const start = new Date(recentDates[0]);
-      const end = new Date();
-      const dateSet = new Set(recentDates);
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const day = d.getDay();
-        if (day !== 0 && day !== 6) { // weekdays only
-          const ds = d.toISOString().split('T')[0];
-          if (!dateSet.has(ds)) missingDays++;
+    if (emp.active && entries.length > 0) {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const recentDates = entries.filter(e => new Date(e.date) >= thirtyDaysAgo).map(e => e.date).sort();
+      if (recentDates.length > 0) {
+        const start = new Date(recentDates[0]);
+        const end = new Date();
+        const dateSet = new Set(recentDates);
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const day = d.getDay();
+          if (day !== 0 && day !== 6) {
+            const ds = d.toISOString().split('T')[0];
+            if (!dateSet.has(ds)) missingDays++;
+          }
         }
       }
     }
-
-    return { name, totalHours, totalTravel, totalCost, entryCount, lastEntry, empType, empTypeInfo, missingDays };
+    return { ...emp, totalHours, totalTravel, totalCost, entryCount, lastEntry, empTypeInfo, missingDays };
   });
 
-  // Sort by total hours descending
-  empStats.sort((a, b) => b.totalHours - a.totalHours);
+  // Also find unrostered employees from timesheets (1099 / ad-hoc)
+  const rosterNames = new Set(roster.map(e => e.name.toLowerCase()));
+  const unrosteredNames = [...new Set(timesheets.map(t => t.employeeName).filter(n => n && !rosterNames.has(n.toLowerCase())))];
+  const unrosteredStats = unrosteredNames.map(name => {
+    const entries = timesheets.filter(t => t.employeeName === name || (t.rows && t.rows.some(r => r.technicianName === name)));
+    const totalHours = entries.reduce((s, t) => s + getTimesheetTotalHours(t), 0);
+    const totalCost = entries.reduce((s, t) => s + (t.totalCost || 0), 0);
+    const entryCount = entries.length;
+    const lastEntry = entries.sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+    return { name, totalHours, totalCost, entryCount, lastEntry, isUnrostered: true };
+  });
 
-  // Dismissed missing entries
-  const dismissed = JSON.parse(localStorage.getItem('psva_hr_dismissed') || '[]');
+  // Separate active vs inactive
+  const activeEmps = rosterStats.filter(e => e.active);
+  const inactiveEmps = rosterStats.filter(e => !e.active);
+  const alertEmps = activeEmps.filter(e => e.missingDays > 3 && !dismissed.includes(e.name));
 
   main.innerHTML = `
     <div class="page-header">
-      <h1>Employee HR Dashboard</h1>
+      <h1>Employee HR</h1>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" onclick="showEmployeeEditor()">+ Add Employee</button>
+      </div>
     </div>
 
-    ${empStats.filter(e => e.missingDays > 3 && !dismissed.includes(e.name)).length > 0 ? `
+    ${alertEmps.length > 0 ? `
     <div class="card" style="border:1px solid #F59E0B40;background:#F59E0B10;margin-bottom:16px;">
       <div class="card-title" style="color:#F59E0B;"><div class="accent-bar" style="background:#F59E0B;"></div>Missing Time Entry Alerts</div>
-      ${empStats.filter(e => e.missingDays > 3 && !dismissed.includes(e.name)).map(e => `
+      ${alertEmps.map(e => `
         <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-color);">
           <div>
             <strong>${escapeHtml(e.name)}</strong> \u2014 ${e.missingDays} weekday(s) without entries in last 30 days
@@ -15142,26 +15968,623 @@ function renderEmployeeHR() {
     </div>` : ''}
 
     <div class="card">
-      <div class="card-title"><div class="accent-bar"></div>Employee Summary</div>
-      ${empStats.length === 0 ? '<p class="intro-text">No employee data found. Create timesheet entries to populate this dashboard.</p>' : ''}
-      ${empStats.map(e => {
+      <div class="card-title"><div class="accent-bar"></div>Active Employees (${activeEmps.length})</div>
+      ${activeEmps.length === 0 ? '<p class="intro-text">No employees added yet. Click \"+ Add Employee\" to build your roster.</p>' : ''}
+      ${activeEmps.sort((a, b) => a.name.localeCompare(b.name)).map(e => {
         const typeBadge = e.empTypeInfo ? '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:' + e.empTypeInfo.color + '20;color:' + e.empTypeInfo.color + ';margin-left:8px;">' + escapeHtml(e.empTypeInfo.name) + '</span>' : '';
+        const classBadge = '<span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:' + (e.classification === '1099' ? '#F59E0B20;color:#F59E0B' : '#3B82F620;color:#3B82F6') + ';margin-left:6px;">' + (e.classification || 'W-2') + '</span>';
         return `
-        <div class="doc-row" onclick="showEmployeeDetail('${escapeHtml(e.name)}')">
-          <div class="doc-row-info">
-            <div class="doc-row-number">${escapeHtml(e.name)} ${typeBadge}</div>
-            <div class="doc-row-meta">${e.entryCount} entries \u00b7 Last: ${e.lastEntry ? formatDateShort(e.lastEntry.date) : 'N/A'}</div>
+        <div class="doc-row" style="cursor:pointer;">
+          <div class="doc-row-info" onclick="showEmployeeDetail('${e.id}')">
+            <div class="doc-row-number">${escapeHtml(e.name)} ${typeBadge} ${classBadge}</div>
+            <div class="doc-row-meta">${e.hireDate ? 'Hired: ' + formatDateShort(e.hireDate) + ' \u00b7 ' : ''}${e.entryCount} timesheet entries${e.lastEntry ? ' \u00b7 Last: ' + formatDateShort(e.lastEntry.date) : ''}${(function(){ const ld = Array.isArray(e.legalDocuments) ? e.legalDocuments : []; const pend = ld.filter(d => d.status === 'pending').length; return pend > 0 ? ' \u00b7 <span style="color:#f59e0b;font-weight:600;">' + pend + ' doc' + (pend > 1 ? 's' : '') + ' pending</span>' : ld.length > 0 ? ' \u00b7 ' + ld.length + ' legal docs' : ''; })()}</div>
           </div>
-          <div class="doc-row-actions">
+          <div class="doc-row-actions" style="display:flex;align-items:center;gap:12px;">
             <div style="text-align:right;">
               <div style="font-weight:600;">${e.totalHours.toFixed(1)} hrs</div>
               <div style="font-size:12px;color:var(--text-secondary);">${formatCurrency(e.totalCost)}</div>
             </div>
+            <button class="btn-icon" onclick="showEmployeeEditor('${e.id}')" title="Edit">\u270E</button>
+            <button class="btn-icon" onclick="confirmDeleteEmployee('${e.id}','${escapeHtml(e.name)}',${e.entryCount})" title="Delete" style="color:#EF4444;">\u2716</button>
           </div>
         </div>`;
       }).join('')}
     </div>
+
+    ${inactiveEmps.length > 0 ? `
+    <div class="card">
+      <div class="card-title" style="color:var(--text-secondary);"><div class="accent-bar" style="background:#6B7280;"></div>Inactive Employees (${inactiveEmps.length})</div>
+      ${inactiveEmps.map(e => {
+        const typeBadge = e.empTypeInfo ? '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:' + e.empTypeInfo.color + '20;color:' + e.empTypeInfo.color + ';margin-left:8px;">' + escapeHtml(e.empTypeInfo.name) + '</span>' : '';
+        return `
+        <div class="doc-row" style="opacity:0.6;">
+          <div class="doc-row-info" onclick="showEmployeeDetail('${e.id}')">
+            <div class="doc-row-number">${escapeHtml(e.name)} ${typeBadge} <span style="font-size:10px;color:#EF4444;margin-left:6px;">INACTIVE</span></div>
+            <div class="doc-row-meta">${e.entryCount} entries \u00b7 ${e.totalHours.toFixed(1)} hrs</div>
+          </div>
+          <div class="doc-row-actions" style="display:flex;align-items:center;gap:12px;">
+            <button class="btn-icon" onclick="showEmployeeEditor('${e.id}')" title="Edit">\u270E</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+
+    ${unrosteredStats.length > 0 ? `
+    <div class="card">
+      <div class="card-title" style="color:#F59E0B;"><div class="accent-bar" style="background:#F59E0B;"></div>Unrostered Timesheet Entries (${unrosteredStats.length})</div>
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;">These names appear in timesheets but are not in the employee roster. Click \"Add to Roster\" to create an employee record.</p>
+      ${unrosteredStats.map(e => `
+        <div class="doc-row">
+          <div class="doc-row-info">
+            <div class="doc-row-number">${escapeHtml(e.name)}</div>
+            <div class="doc-row-meta">${e.entryCount} entries \u00b7 ${e.totalHours.toFixed(1)} hrs \u00b7 ${formatCurrency(e.totalCost)}</div>
+          </div>
+          <div class="doc-row-actions">
+            <button class="btn btn-secondary btn-sm" onclick="addUnrosteredToRoster('${escapeHtml(e.name)}')">Add to Roster</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>` : ''}
   `;
+}
+
+function addUnrosteredToRoster(name) {
+  const emp = getDefaultEmployee();
+  emp.name = name;
+  saveEmployee(emp);
+  renderEmployeeHR();
+  showToast(name + ' added to employee roster', 'success');
+}
+
+function showEmployeeEditor(empId) {
+  const main = document.querySelector('.main-content');
+  const empTypes = getEmployeeTypes();
+  const emp = empId ? getEmployeeById(empId) : getDefaultEmployee();
+  if (!emp) { showToast('Employee not found', 'error'); return; }
+  const isNew = !empId;
+
+  const maskedSSN = emp.ssn ? '***-**-' + emp.ssn.slice(-4) : '';
+  const timesheetCount = getTimesheets().filter(t => t.employeeName === emp.name).length;
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="btn-icon" onclick="showPage('employee-hr')" title="Back">\u2190</button>
+        <h1>${isNew ? 'Add Employee' : 'Edit Employee'}</h1>
+      </div>
+      ${!isNew ? `<div class="page-header-actions">
+        <button class="btn btn-secondary" style="opacity:0.7;" onclick="toggleEmployeeActive('${emp.id}', ${emp.active})">${emp.active ? '⏸ Deactivate' : '▶ Reactivate'}</button>
+        <button class="btn" style="background:#7f1d1d;color:#fca5a5;" onclick="confirmDeleteEmployee('${emp.id}', '${escapeHtml(emp.name)}', ${timesheetCount})">🗑 Delete</button>
+      </div>` : ''}
+    </div>
+
+    <div class="card">
+      <div class="card-title"><div class="accent-bar"></div>Personal Information</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="form-group"><label class="form-label">Full Name *</label><input class="form-input" id="emp-name" value="${escapeHtml(emp.name)}" placeholder="Employee full name"></div>
+        <div class="form-group"><label class="form-label">SSN (Social Security Number)</label>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input class="form-input" id="emp-ssn" type="password" value="${escapeHtml(emp.ssn || '')}" placeholder="XXX-XX-XXXX" style="flex:1;">
+            <button class="btn btn-secondary" style="padding:6px 10px;font-size:11px;white-space:nowrap;" onclick="toggleSSNVisibility()">Show/Hide</button>
+          </div>
+          ${maskedSSN ? '<span style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;">Stored: ' + maskedSSN + '</span>' : ''}
+        </div>
+        <div class="form-group"><label class="form-label">Home Address</label><input class="form-input" id="emp-address" value="${escapeHtml(emp.address || '')}" placeholder="123 Main Street"></div>
+        <div class="form-group"><label class="form-label">City</label><input class="form-input" id="emp-city" value="${escapeHtml(emp.city || '')}" placeholder="Richmond"></div>
+        <div class="form-group"><label class="form-label">State</label><input class="form-input" id="emp-state" value="${escapeHtml(emp.state || '')}" placeholder="VA"></div>
+        <div class="form-group"><label class="form-label">Zip Code</label><input class="form-input" id="emp-zip" value="${escapeHtml(emp.zip || '')}" placeholder="23220"></div>
+        <div class="form-group"><label class="form-label">Personal Phone</label><input class="form-input" id="emp-personalphone" value="${escapeHtml(emp.personalPhone || '')}" placeholder="(555) 111-2222"></div>
+        <div class="form-group"><label class="form-label">Work Phone</label><input class="form-input" id="emp-phone" value="${escapeHtml(emp.phone || '')}" placeholder="(555) 123-4567"></div>
+        <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="emp-email" value="${escapeHtml(emp.email || '')}" placeholder="employee@email.com"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><div class="accent-bar"></div>Emergency Contact</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="form-group"><label class="form-label">Emergency Contact Name</label><input class="form-input" id="emp-emergency" value="${escapeHtml(emp.emergencyContact || '')}" placeholder="Contact name"></div>
+        <div class="form-group"><label class="form-label">Emergency Contact Phone</label><input class="form-input" id="emp-emergencyphone" value="${escapeHtml(emp.emergencyPhone || '')}" placeholder="(555) 987-6543"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><div class="accent-bar"></div>Employment Details</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="form-group"><label class="form-label">Employee Type</label>
+          <select class="form-select" id="emp-type">
+            <option value="">\u2014 Select Type \u2014</option>
+            ${empTypes.map(t => '<option value="' + t.id + '"' + (emp.employeeType === t.id ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>').join('')}
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Classification</label>
+          <select class="form-select" id="emp-classification">
+            <option value="W-2"${emp.classification === 'W-2' ? ' selected' : ''}>W-2 Employee</option>
+            <option value="1099"${emp.classification === '1099' ? ' selected' : ''}>1099 Contractor</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Hire Date</label><input class="form-input" type="date" id="emp-hiredate" value="${emp.hireDate || ''}"></div>
+        <div class="form-group"><label class="form-label">Termination Date</label><input class="form-input" type="date" id="emp-termdate" value="${emp.terminationDate || ''}" ${emp.active ? 'disabled' : ''}></div>
+        <div class="form-group"><label class="form-label">Pay Rate ($/hr) — Employee Compensation</label>
+          <input class="form-input" type="number" id="emp-payrate" value="${emp.payRate || 0}" min="0" step="0.50" placeholder="0.00">
+          <span style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;">⚠ This is the employee's actual pay — NOT the customer billing rate. Used for internal P&L calculations only.</span>
+        </div>
+        <div class="form-group"><label class="form-label">Pay Type</label>
+          <select class="form-select" id="emp-paytype">
+            <option value="hourly"${(emp.payType || 'hourly') === 'hourly' ? ' selected' : ''}>Hourly</option>
+            <option value="salary"${emp.payType === 'salary' ? ' selected' : ''}>Salary</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><div class="accent-bar"></div>Certifications & Licenses
+        <button class="btn btn-sm btn-primary" style="margin-left:auto;" onclick="addEmpCert()">+ Add Certification</button>
+      </div>
+      <div id="emp-certs-list"></div>
+      <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">These certifications sync with the Technician dashboard when "Sync to Technician Dashboard" is checked below.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:8px;"><div class="accent-bar"></div>Legal & Onboarding Documents</div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm btn-secondary" onclick="showAddLegalDocTemplates()">+ Add from Template</button>
+          <button class="btn btn-sm btn-primary" onclick="addLegalDoc()">+ Add Custom</button>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Track onboarding paperwork, tax forms, signed agreements, and policy acknowledgments. Upload scanned copies for record-keeping.</p>
+      <div id="emp-legal-docs-list"></div>
+      <div id="emp-legal-docs-summary" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><div class="accent-bar"></div>Notes</div>
+      <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="emp-notes" rows="3" placeholder="Additional notes">${escapeHtml(emp.notes || '')}</textarea></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><div class="accent-bar"></div>Status & Technician Sync</div>
+      <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="emp-active" ${emp.active ? 'checked' : ''} onchange="document.getElementById('emp-termdate').disabled = this.checked;">
+        <label for="emp-active" class="form-label" style="margin:0;">Active Employee</label>
+      </div>
+      ${!emp.active ? '<div style="padding:10px;background:#7f1d1d33;border:1px solid #7f1d1d;border-radius:6px;margin-top:8px;font-size:12px;color:#fca5a5;">⚠ This employee is <strong>inactive</strong>. They will not appear in timesheet dropdowns but all historical data is preserved.</div>' : ''}
+      <div class="form-group" style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+        <input type="checkbox" id="emp-sync-tech" ${emp.syncToTechnician ? 'checked' : ''}>
+        <label for="emp-sync-tech" class="form-label" style="margin:0;">Sync to Technician Dashboard</label>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;padding-left:24px;">When checked, saving this employee will automatically create or update a matching Technician record with name, title, phone, email, hire date, and certifications. Unchecking will NOT delete the technician — it only stops future syncing.</div>
+      ${emp.linkedTechnicianId ? '<div style="font-size:11px;color:#22C55E;margin-top:6px;padding-left:24px;">✓ Linked to Technician record (ID: ' + emp.linkedTechnicianId.substring(0,8) + '...)</div>' : ''}
+      <div style="display:flex;gap:12px;margin-top:20px;">
+        <button class="btn btn-primary" onclick="saveEmployeeFromEditor('${emp.id}', ${isNew})">${isNew ? 'Add Employee' : 'Save Changes'}</button>
+        <button class="btn btn-secondary" onclick="showPage('employee-hr')">Cancel</button>
+      </div>
+    </div>
+  `;
+
+  // Initialize structured certifications for the editor
+  const empCerts = Array.isArray(emp.certifications) ? emp.certifications : [];
+  window._empCerts = empCerts.map(c => ({...c}));
+  renderEmpCerts();
+
+  // Initialize legal documents for the editor
+  const empLegalDocs = Array.isArray(emp.legalDocuments) ? emp.legalDocuments : [];
+  window._empLegalDocs = empLegalDocs.map(d => ({...d}));
+  renderEmpLegalDocs();
+}
+
+function saveEmployeeFromEditor(empId, isNew) {
+  const name = document.getElementById('emp-name').value.trim();
+  if (!name) { showToast('Employee name is required', 'error'); return; }
+  const emp = isNew ? getDefaultEmployee() : (getEmployeeById(empId) || getDefaultEmployee());
+  if (!isNew) emp.id = empId;
+  emp.name = name;
+  emp.employeeType = document.getElementById('emp-type').value;
+  emp.classification = document.getElementById('emp-classification').value;
+  emp.hireDate = document.getElementById('emp-hiredate').value;
+  emp.terminationDate = document.getElementById('emp-termdate')?.value || '';
+  emp.phone = document.getElementById('emp-phone').value.trim();
+  emp.personalPhone = (document.getElementById('emp-personalphone')?.value || '').trim();
+  emp.email = document.getElementById('emp-email').value.trim();
+  emp.address = (document.getElementById('emp-address')?.value || '').trim();
+  emp.city = (document.getElementById('emp-city')?.value || '').trim();
+  emp.state = (document.getElementById('emp-state')?.value || '').trim();
+  emp.zip = (document.getElementById('emp-zip')?.value || '').trim();
+  emp.emergencyContact = document.getElementById('emp-emergency').value.trim();
+  emp.emergencyPhone = document.getElementById('emp-emergencyphone').value.trim();
+  emp.ssn = (document.getElementById('emp-ssn')?.value || '').trim();
+  emp.payRate = parseFloat(document.getElementById('emp-payrate')?.value) || 0;
+  emp.payType = document.getElementById('emp-paytype')?.value || 'hourly';
+  emp.certifications = window._empCerts || [];
+  emp.legalDocuments = window._empLegalDocs || [];
+  emp.notes = document.getElementById('emp-notes').value.trim();
+  emp.active = document.getElementById('emp-active').checked;
+  emp.syncToTechnician = document.getElementById('emp-sync-tech').checked;
+  saveEmployee(emp);
+
+  // Sync to Technician dashboard if checkbox is checked
+  if (emp.syncToTechnician) {
+    syncEmployeeToTechnician(emp);
+  }
+
+  showToast(isNew ? 'Employee added successfully' : 'Employee updated', 'success');
+  showPage('employee-hr');
+}
+
+function toggleSSNVisibility() {
+  const input = document.getElementById('emp-ssn');
+  if (!input) return;
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+// ===== EMPLOYEE CERTIFICATIONS (Structured, matching Technician system) =====
+
+function renderEmpCerts() {
+  const container = document.getElementById('emp-certs-list');
+  if (!container) return;
+  if (!window._empCerts || window._empCerts.length === 0) {
+    container.innerHTML = '<p class="intro-text">No certifications added. Click "+ Add Certification" above.</p>';
+    return;
+  }
+  container.innerHTML = window._empCerts.map((c, idx) => {
+    const st = getCertStatus(c);
+    return `
+    <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span class="status-badge" style="background:${st.color}20;color:${st.color};">${st.label}</span>
+        <button class="delete-btn" onclick="removeEmpCert(${idx})" title="Remove">✕</button>
+      </div>
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">Certification Name</label><input class="form-input" value="${escapeHtml(c.name)}" onchange="window._empCerts[${idx}].name=this.value;"></div>
+        <div class="form-group"><label class="form-label">Issuing Body</label><input class="form-input" value="${escapeHtml(c.issuingBody || '')}" onchange="window._empCerts[${idx}].issuingBody=this.value;"></div>
+        <div class="form-group"><label class="form-label">Cert/License Number</label><input class="form-input" value="${escapeHtml(c.certNumber || '')}" onchange="window._empCerts[${idx}].certNumber=this.value;"></div>
+        <div class="form-group"><label class="form-label">Issue Date</label><input class="form-input" type="date" value="${c.issueDate || ''}" onchange="window._empCerts[${idx}].issueDate=this.value;"></div>
+        <div class="form-group"><label class="form-label">Expiration Date</label><input class="form-input" type="date" value="${c.expirationDate || ''}" onchange="window._empCerts[${idx}].expirationDate=this.value; renderEmpCerts();"></div>
+        <div class="form-group"><label class="form-label">Document</label>
+          ${c.documentName ? `<div style="font-size:13px;margin-bottom:4px;">📄 ${escapeHtml(c.documentName)} <button class="btn btn-sm btn-secondary" onclick="removeEmpCertDoc(${idx})">Remove</button></div>` : ''}
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onchange="uploadEmpCertDoc(${idx}, this)" style="font-size:13px;">
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function addEmpCert() {
+  if (!window._empCerts) window._empCerts = [];
+  window._empCerts.push(getDefaultCertification());
+  renderEmpCerts();
+}
+
+function removeEmpCert(idx) {
+  window._empCerts.splice(idx, 1);
+  renderEmpCerts();
+}
+
+function uploadEmpCertDoc(idx, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    window._empCerts[idx].documentData = e.target.result;
+    window._empCerts[idx].documentName = file.name;
+    renderEmpCerts();
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeEmpCertDoc(idx) {
+  window._empCerts[idx].documentData = '';
+  window._empCerts[idx].documentName = '';
+  renderEmpCerts();
+}
+
+// ===== LEGAL & ONBOARDING DOCUMENTS =====
+
+function renderEmpLegalDocs() {
+  const container = document.getElementById('emp-legal-docs-list');
+  const summaryEl = document.getElementById('emp-legal-docs-summary');
+  if (!container) return;
+  const docs = window._empLegalDocs || [];
+  if (docs.length === 0) {
+    container.innerHTML = '<p class="intro-text">No legal documents added yet. Use "+ Add from Template" to quickly add common onboarding forms, or "+ Add Custom" for other documents.</p>';
+    if (summaryEl) summaryEl.innerHTML = '';
+    return;
+  }
+
+  // Group by category
+  const grouped = {};
+  docs.forEach((d, idx) => {
+    const catId = d.category || 'other';
+    if (!grouped[catId]) grouped[catId] = [];
+    grouped[catId].push({ doc: d, idx });
+  });
+
+  let html = '';
+  for (const catId of Object.keys(grouped)) {
+    const catInfo = LEGAL_DOC_CATEGORIES.find(c => c.id === catId) || { name: 'Other' };
+    html += `<div style="margin-bottom:16px;">`;
+    html += `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border);">${escapeHtml(catInfo.name)}</div>`;
+    grouped[catId].forEach(({ doc, idx }) => {
+      const statusInfo = LEGAL_DOC_STATUSES.find(s => s.id === doc.status) || LEGAL_DOC_STATUSES[0];
+      const isExpired = doc.expirationDate && new Date(doc.expirationDate) < new Date();
+      const effectiveStatus = isExpired && doc.status !== 'not_applicable' ? LEGAL_DOC_STATUSES.find(s => s.id === 'expired') : statusInfo;
+      html += `
+      <div class="mini-row" style="padding:10px 12px;display:flex;align-items:flex-start;gap:12px;margin-bottom:6px;">
+        <div style="flex:1;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <input class="form-input" value="${escapeHtml(doc.name)}" placeholder="Document name" style="font-weight:600;flex:1;" onchange="window._empLegalDocs[${idx}].name=this.value;">
+            <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:${effectiveStatus.color}22;color:${effectiveStatus.color};white-space:nowrap;">${effectiveStatus.name}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+            <div class="form-group">
+              <label class="form-label">Status</label>
+              <select class="form-select" onchange="window._empLegalDocs[${idx}].status=this.value; renderEmpLegalDocs();">
+                ${LEGAL_DOC_STATUSES.map(s => `<option value="${s.id}"${doc.status === s.id ? ' selected' : ''}>${s.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Date Signed</label>
+              <input class="form-input" type="date" value="${doc.dateSigned || ''}" onchange="window._empLegalDocs[${idx}].dateSigned=this.value;">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Expiration</label>
+              <input class="form-input" type="date" value="${doc.expirationDate || ''}" onchange="window._empLegalDocs[${idx}].expirationDate=this.value; renderEmpLegalDocs();">
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">Notes</label>
+              <input class="form-input" value="${escapeHtml(doc.notes || '')}" placeholder="Optional notes" style="font-size:12px;" onchange="window._empLegalDocs[${idx}].notes=this.value;">
+            </div>
+          </div>
+          <div style="margin-top:6px;">
+            <label class="form-label">Attached File</label>
+            ${doc.fileName ? `<div style="font-size:13px;margin-bottom:4px;display:flex;align-items:center;gap:6px;">
+              <span>📄 ${escapeHtml(doc.fileName)}</span>
+              <button class="btn btn-sm btn-secondary" onclick="viewLegalDocFile(${idx})">View</button>
+              <button class="btn btn-sm btn-secondary" onclick="removeLegalDocFile(${idx})">Remove</button>
+            </div>` : ''}
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xlsx,.txt" onchange="uploadLegalDocFile(${idx}, this)" style="font-size:12px;">
+          </div>
+        </div>
+        <button class="btn-icon" onclick="removeLegalDoc(${idx})" title="Remove document" style="margin-top:4px;">\u2715</button>
+      </div>`;
+    });
+    html += '</div>';
+  }
+  container.innerHTML = html;
+
+  // Summary bar
+  if (summaryEl) {
+    const total = docs.length;
+    const signed = docs.filter(d => d.status === 'signed').length;
+    const received = docs.filter(d => d.status === 'received').length;
+    const pending = docs.filter(d => d.status === 'pending').length;
+    const expired = docs.filter(d => (d.expirationDate && new Date(d.expirationDate) < new Date()) || d.status === 'expired').length;
+    summaryEl.innerHTML = `<div style="display:flex;gap:16px;font-size:12px;color:var(--text-secondary);padding:8px 12px;background:var(--bg-secondary);border-radius:6px;">
+      <span><strong>${total}</strong> total</span>
+      <span style="color:#22c55e;"><strong>${signed}</strong> signed</span>
+      <span style="color:#3b82f6;"><strong>${received}</strong> received</span>
+      <span style="color:#f59e0b;"><strong>${pending}</strong> pending</span>
+      ${expired > 0 ? `<span style="color:#dc2626;"><strong>${expired}</strong> expired</span>` : ''}
+    </div>`;
+  }
+}
+
+function addLegalDoc() {
+  if (!window._empLegalDocs) window._empLegalDocs = [];
+  window._empLegalDocs.push({
+    id: generateId(),
+    name: '',
+    category: 'other',
+    status: 'pending',
+    dateAdded: new Date().toISOString().split('T')[0],
+    dateSigned: '',
+    expirationDate: '',
+    notes: '',
+    fileData: '',
+    fileName: ''
+  });
+  renderEmpLegalDocs();
+}
+
+function removeLegalDoc(idx) {
+  if (!confirm('Remove this legal document?')) return;
+  window._empLegalDocs.splice(idx, 1);
+  renderEmpLegalDocs();
+}
+
+function uploadLegalDocFile(idx, input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { showToast('File too large (max 10MB)', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    window._empLegalDocs[idx].fileData = e.target.result;
+    window._empLegalDocs[idx].fileName = file.name;
+    renderEmpLegalDocs();
+    showToast('File attached: ' + file.name);
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeLegalDocFile(idx) {
+  window._empLegalDocs[idx].fileData = '';
+  window._empLegalDocs[idx].fileName = '';
+  renderEmpLegalDocs();
+}
+
+function viewLegalDocFile(idx) {
+  const doc = window._empLegalDocs[idx];
+  if (!doc || !doc.fileData) { showToast('No file attached', 'error'); return; }
+  const win = window.open();
+  if (doc.fileData.startsWith('data:application/pdf') || doc.fileName.endsWith('.pdf')) {
+    win.document.write(`<html><head><title>${escapeHtml(doc.fileName)}</title></head><body style="margin:0;"><iframe src="${doc.fileData}" style="width:100%;height:100vh;border:none;"></iframe></body></html>`);
+  } else if (doc.fileData.startsWith('data:image')) {
+    win.document.write(`<html><head><title>${escapeHtml(doc.fileName)}</title></head><body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#111;"><img src="${doc.fileData}" style="max-width:100%;max-height:100vh;"></body></html>`);
+  } else {
+    // For other file types, trigger download
+    const a = document.createElement('a');
+    a.href = doc.fileData;
+    a.download = doc.fileName;
+    a.click();
+    win.close();
+  }
+}
+
+function showAddLegalDocTemplates() {
+  let bodyHtml = '<div style="max-height:500px;overflow-y:auto;padding:4px;">';
+  LEGAL_DOC_CATEGORIES.forEach(cat => {
+    if (cat.templates.length === 0) return;
+    bodyHtml += `<div style="margin-bottom:16px;">`;
+    bodyHtml += `<div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--text-primary);">${escapeHtml(cat.name)}</div>`;
+    cat.templates.forEach(tmpl => {
+      const exists = (window._empLegalDocs || []).some(d => d.name === tmpl);
+      bodyHtml += `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-radius:6px;margin-bottom:4px;background:var(--bg-tertiary,var(--bg-secondary));">`;
+      bodyHtml += `<span style="font-size:13px;">${escapeHtml(tmpl)}</span>`;
+      if (exists) {
+        bodyHtml += `<span style="font-size:11px;color:var(--text-muted);font-style:italic;">Already added</span>`;
+      } else {
+        bodyHtml += `<button class="btn btn-sm btn-primary" onclick="addLegalDocFromTemplate('${escapeHtml(cat.id)}','${escapeHtml(tmpl)}'); this.textContent='Added'; this.disabled=true; this.style.opacity='0.5';">+ Add</button>`;
+      }
+      bodyHtml += '</div>';
+    });
+    bodyHtml += '</div>';
+  });
+  bodyHtml += '</div>';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'legal-template-modal-overlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:24px;width:560px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;color:var(--text-primary);box-shadow:0 20px 60px var(--shadow);';
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;font-size:18px;font-weight:600;">Add Onboarding Documents</h3>
+      <button onclick="document.getElementById('legal-template-modal-overlay').remove();" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary);padding:4px 8px;">&times;</button>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Click "+ Add" next to each document you need. Already-added documents are marked.</p>
+    ${bodyHtml}
+    <div style="display:flex;justify-content:flex-end;margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+      <button class="btn btn-secondary" onclick="document.getElementById('legal-template-modal-overlay').remove();">Close</button>
+    </div>
+  `;
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function addLegalDocFromTemplate(catId, name) {
+  if (!window._empLegalDocs) window._empLegalDocs = [];
+  // Prevent duplicates
+  if (window._empLegalDocs.some(d => d.name === name)) {
+    showToast('Document already exists: ' + name, 'warning');
+    return;
+  }
+  window._empLegalDocs.push({
+    id: generateId(),
+    name: name,
+    category: catId,
+    status: 'pending',
+    dateAdded: new Date().toISOString().split('T')[0],
+    dateSigned: '',
+    expirationDate: '',
+    notes: '',
+    fileData: '',
+    fileName: ''
+  });
+  renderEmpLegalDocs();
+  showToast('Added: ' + name);
+}
+
+// ===== EMPLOYEE → TECHNICIAN SYNC =====
+
+function syncEmployeeToTechnician(emp) {
+  const techs = getTechnicians();
+  const empTypes = getEmployeeTypes();
+  const empTypeInfo = emp.employeeType ? empTypes.find(t => t.id === emp.employeeType) : null;
+  const titleFromType = empTypeInfo ? empTypeInfo.name : '';
+
+  // Find existing linked technician by linkedTechnicianId, or by matching name (dedup)
+  let tech = null;
+  if (emp.linkedTechnicianId) {
+    tech = techs.find(t => t.id === emp.linkedTechnicianId);
+  }
+  if (!tech) {
+    // Try to find by name match to prevent duplicates
+    tech = techs.find(t => t.name.toLowerCase().trim() === emp.name.toLowerCase().trim());
+  }
+
+  const isNew = !tech;
+  if (isNew) {
+    tech = getDefaultTechnician();
+  }
+
+  // Map fields from HR employee to Technician
+  tech.name = emp.name;
+  tech.title = titleFromType || tech.title;
+  tech.phone = emp.phone || tech.phone;
+  tech.email = emp.email || tech.email;
+  tech.hireDate = emp.hireDate || tech.hireDate;
+  tech.linkedEmployeeId = emp.id;
+
+  // Sync certifications: replace technician certs with employee certs
+  // (HR is the source of truth when sync is enabled)
+  if (Array.isArray(emp.certifications)) {
+    tech.certifications = emp.certifications.map(c => ({...c}));
+  }
+
+  // Preserve technician notes but append HR notes if different
+  if (emp.notes && emp.notes !== tech.notes) {
+    if (!tech.notes) {
+      tech.notes = emp.notes;
+    } else if (!tech.notes.includes(emp.notes)) {
+      tech.notes = emp.notes + '\n---\n' + tech.notes;
+    }
+  }
+
+  saveTechnician(tech);
+
+  // Store the link back on the employee
+  emp.linkedTechnicianId = tech.id;
+  saveEmployee(emp);
+
+  showToast(isNew ? 'Technician record created for ' + emp.name : 'Technician record updated for ' + emp.name, 'success');
+}
+
+function toggleEmployeeActive(empId, currentlyActive) {
+  const emp = getEmployeeById(empId);
+  if (!emp) return;
+  if (currentlyActive) {
+    showConfirm('Deactivate "' + emp.name + '"?\n\nThey will be removed from timesheet dropdowns but all historical data will be preserved. You can reactivate them at any time.', function() {
+      emp.active = false;
+      emp.terminationDate = emp.terminationDate || todayStr();
+      saveEmployee(emp);
+      showToast(emp.name + ' has been deactivated', 'success');
+      showEmployeeEditor(empId);
+    });
+  } else {
+    emp.active = true;
+    saveEmployee(emp);
+    showToast(emp.name + ' has been reactivated', 'success');
+    showEmployeeEditor(empId);
+  }
+}
+
+function confirmDeleteEmployee(empId, empName, timesheetCount) {
+  const tsCount = timesheetCount || 0;
+  let msg = '\u26a0 PERMANENT DELETE\n\nAre you sure you want to permanently delete "' + empName + '"?\n\nThis action CANNOT be undone. The employee\'s profile, pay rate, SSN, address, and all personal data will be permanently removed.';
+  if (tsCount > 0) {
+    msg += '\n\n\u26a0 DATA ORPHANING WARNING: This employee has ' + tsCount + ' timesheet entr' + (tsCount === 1 ? 'y' : 'ies') + ' linked to their name. Deleting this employee will ORPHAN those records \u2014 they will still exist but no longer link to an employee profile.';
+    msg += '\n\nConsider DEACTIVATING instead of deleting to preserve data integrity.';
+  }
+  showConfirm(msg, function() {
+    deleteEmployee(empId);
+    showPage('employee-hr');
+    showToast('Employee "' + empName + '" permanently deleted', 'success');
+  });
 }
 
 function dismissMissingEntry(name) {
@@ -15172,13 +16595,16 @@ function dismissMissingEntry(name) {
   showToast('Alert dismissed for ' + name);
 }
 
-function showEmployeeDetail(name) {
+function showEmployeeDetail(empId) {
   const main = document.querySelector('.main-content');
-  const timesheets = getTimesheets().filter(t => t.employeeName === name);
+  const emp = getEmployeeById(empId);
+  if (!emp) { showToast('Employee not found', 'error'); return; }
+  const timesheets = getTimesheets().filter(t => t.employeeName === emp.name || t.employeeRosterId === empId);
   const jobs = getJobs();
   const empTypes = getEmployeeTypes();
+  const empTypeInfo = emp.employeeType ? empTypes.find(t => t.id === emp.employeeType) : null;
 
-  const totalHours = timesheets.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
+  const totalHours = timesheets.reduce((s, t) => s + getTimesheetTotalHours(t), 0);
   const totalTravel = timesheets.reduce((s, t) => s + (t.hoursTravel || 0), 0);
   const totalCost = timesheets.reduce((s, t) => s + (t.totalCost || 0), 0);
   const avgHoursPerEntry = timesheets.length > 0 ? totalHours / timesheets.length : 0;
@@ -15188,7 +16614,7 @@ function showEmployeeDetail(name) {
   timesheets.forEach(t => {
     const key = (t.date || '').substring(0, 7);
     if (!monthlyData[key]) monthlyData[key] = { hours: 0, cost: 0, entries: 0 };
-    monthlyData[key].hours += (t.hoursRegular || 0) + (t.hoursOvertime || 0);
+    monthlyData[key].hours += getTimesheetTotalHours(t);
     monthlyData[key].cost += t.totalCost || 0;
     monthlyData[key].entries++;
   });
@@ -15199,17 +16625,95 @@ function showEmployeeDetail(name) {
   timesheets.forEach(t => {
     const jid = t.jobId || 'unassigned';
     if (!jobData[jid]) jobData[jid] = { hours: 0, cost: 0 };
-    jobData[jid].hours += (t.hoursRegular || 0) + (t.hoursOvertime || 0);
+    jobData[jid].hours += getTimesheetTotalHours(t);
     jobData[jid].cost += t.totalCost || 0;
   });
+
+  const typeBadge = empTypeInfo ? '<span style="display:inline-block;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:600;background:' + empTypeInfo.color + '20;color:' + empTypeInfo.color + ';margin-left:10px;">' + escapeHtml(empTypeInfo.name) + '</span>' : '';
+  const classBadge = '<span style="display:inline-block;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;background:' + (emp.classification === '1099' ? '#F59E0B20;color:#F59E0B' : '#3B82F620;color:#3B82F6') + ';margin-left:6px;">' + (emp.classification || 'W-2') + '</span>';
 
   main.innerHTML = `
     <div class="page-header">
       <div style="display:flex;align-items:center;gap:12px;">
         <button class="btn-icon" onclick="showPage('employee-hr')" title="Back">\u2190</button>
-        <h1>${escapeHtml(name)}</h1>
+        <h1>${escapeHtml(emp.name)} ${typeBadge} ${classBadge}</h1>
+      </div>
+      <button class="btn btn-secondary" onclick="showEmployeeEditor('${emp.id}')">\u270E Edit</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+      <div class="card">
+        <div class="card-title"><div class="accent-bar"></div>Personal Information</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;">
+          <div><strong>Work Phone:</strong> ${escapeHtml(emp.phone || 'Not set')}</div>
+          <div><strong>Personal Phone:</strong> ${escapeHtml(emp.personalPhone || 'Not set')}</div>
+          <div><strong>Email:</strong> ${escapeHtml(emp.email || 'Not set')}</div>
+          <div><strong>SSN:</strong> ${emp.ssn ? '***-**-' + emp.ssn.slice(-4) : 'Not set'}</div>
+          <div style="grid-column:span 2;"><strong>Address:</strong> ${emp.address ? escapeHtml(emp.address + (emp.city ? ', ' + emp.city : '') + (emp.state ? ', ' + emp.state : '') + (emp.zip ? ' ' + emp.zip : '')) : 'Not set'}</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><div class="accent-bar"></div>Employment Details</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;">
+          <div><strong>Hire Date:</strong> ${emp.hireDate ? formatDateShort(emp.hireDate) : 'Not set'}</div>
+          <div><strong>Status:</strong> ${emp.active ? '<span style="color:#22C55E;">Active</span>' : '<span style="color:#EF4444;">Inactive' + (emp.terminationDate ? ' (' + formatDateShort(emp.terminationDate) + ')' : '') + '</span>'}</div>
+          <div><strong>Classification:</strong> ${emp.classification || 'W-2'}</div>
+          <div><strong>Pay Type:</strong> ${(emp.payType || 'hourly').charAt(0).toUpperCase() + (emp.payType || 'hourly').slice(1)}</div>
+          <div><strong>Pay Rate:</strong> <span style="color:#F59E0B;">${emp.payRate ? '$' + parseFloat(emp.payRate).toFixed(2) + '/hr' : 'Not set'}</span> <span style="font-size:10px;color:var(--text-muted);">(CONFIDENTIAL)</span></div>
+          <div><strong>Emergency:</strong> ${escapeHtml(emp.emergencyContact || 'Not set')} ${emp.emergencyPhone ? '(' + escapeHtml(emp.emergencyPhone) + ')' : ''}</div>
+        </div>
       </div>
     </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-title"><div class="accent-bar"></div>Certifications & Licenses</div>
+      ${(function() {
+        const certs = Array.isArray(emp.certifications) ? emp.certifications : [];
+        if (certs.length === 0) return '<div style="font-size:13px;color:var(--text-muted);">No certifications listed.</div>';
+        return '<table style="width:100%;font-size:13px;"><thead><tr><th style="text-align:left;">Certification</th><th style="text-align:left;">Issuing Body</th><th style="text-align:left;">Cert #</th><th style="text-align:left;">Issued</th><th style="text-align:left;">Expires</th><th style="text-align:left;">Status</th></tr></thead><tbody>' +
+        certs.map(c => {
+          const st = getCertStatus(c);
+          return '<tr><td>' + escapeHtml(c.name || '') + '</td><td>' + escapeHtml(c.issuingBody || '') + '</td><td>' + escapeHtml(c.certNumber || '') + '</td><td>' + (c.issueDate || '-') + '</td><td>' + (c.expirationDate || '-') + '</td><td><span style="color:' + st.color + ';font-weight:600;">' + st.label + '</span></td></tr>';
+        }).join('') + '</tbody></table>';
+      })()}
+      ${emp.syncToTechnician ? '<div style="font-size:11px;color:#22C55E;margin-top:8px;">✓ Synced to Technician Dashboard</div>' : ''}
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-title"><div class="accent-bar"></div>Legal & Onboarding Documents</div>
+      ${(function() {
+        const docs = Array.isArray(emp.legalDocuments) ? emp.legalDocuments : [];
+        if (docs.length === 0) return '<div style="font-size:13px;color:var(--text-muted);">No legal documents on file.</div>';
+        const pending = docs.filter(d => d.status === 'pending').length;
+        const signed = docs.filter(d => d.status === 'signed').length;
+        const received = docs.filter(d => d.status === 'received').length;
+        const expired = docs.filter(d => (d.expirationDate && new Date(d.expirationDate) < new Date()) || d.status === 'expired').length;
+        let html = '<div style="display:flex;gap:16px;font-size:12px;margin-bottom:12px;padding:8px 12px;background:var(--bg-secondary);border-radius:6px;">';
+        html += '<span><strong>' + docs.length + '</strong> total</span>';
+        html += '<span style="color:#22c55e;"><strong>' + signed + '</strong> signed</span>';
+        html += '<span style="color:#3b82f6;"><strong>' + received + '</strong> received</span>';
+        if (pending > 0) html += '<span style="color:#f59e0b;"><strong>' + pending + '</strong> pending</span>';
+        if (expired > 0) html += '<span style="color:#dc2626;"><strong>' + expired + '</strong> expired</span>';
+        html += '</div>';
+        html += '<table style="width:100%;font-size:13px;"><thead><tr><th style="text-align:left;">Document</th><th style="text-align:left;">Category</th><th style="text-align:left;">Status</th><th style="text-align:left;">Date Signed</th><th style="text-align:left;">Expires</th><th style="text-align:left;">File</th></tr></thead><tbody>';
+        docs.forEach(d => {
+          const catInfo = LEGAL_DOC_CATEGORIES.find(c => c.id === d.category) || { name: 'Other' };
+          const statusInfo = LEGAL_DOC_STATUSES.find(s => s.id === d.status) || LEGAL_DOC_STATUSES[0];
+          const isExpired = d.expirationDate && new Date(d.expirationDate) < new Date();
+          const effectiveStatus = isExpired && d.status !== 'not_applicable' ? LEGAL_DOC_STATUSES.find(s => s.id === 'expired') : statusInfo;
+          html += '<tr><td>' + escapeHtml(d.name || 'Untitled') + '</td>';
+          html += '<td>' + escapeHtml(catInfo.name) + '</td>';
+          html += '<td><span style="color:' + effectiveStatus.color + ';font-weight:600;">' + effectiveStatus.name + '</span></td>';
+          html += '<td>' + (d.dateSigned || '-') + '</td>';
+          html += '<td>' + (d.expirationDate || '-') + '</td>';
+          html += '<td>' + (d.fileName ? '📄 ' + escapeHtml(d.fileName) : '-') + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        return html;
+      })()}
+    </div>
+
+    ${emp.notes ? '<div class="card" style="margin-bottom:16px;"><div class="card-title"><div class="accent-bar"></div>Notes</div><div style="font-size:13px;">' + escapeHtml(emp.notes) + '</div></div>' : ''}
+
     <div class="dashboard-stats">
       <div class="stat-card"><div class="stat-label">Total Hours</div><div class="stat-value">${totalHours.toFixed(1)}</div></div>
       <div class="stat-card"><div class="stat-label">Travel Hours</div><div class="stat-value">${totalTravel.toFixed(1)}</div></div>
@@ -15221,41 +16725,38 @@ function showEmployeeDetail(name) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div class="card">
         <div class="card-title"><div class="accent-bar"></div>Monthly Breakdown</div>
+        ${months.length === 0 ? '<p class="intro-text">No timesheet entries yet.</p>' : `
         <table style="width:100%;font-size:13px;">
           <thead><tr><th style="text-align:left;">Month</th><th style="text-align:right;">Hours</th><th style="text-align:right;">Cost</th><th style="text-align:right;">Entries</th></tr></thead>
           <tbody>
-            ${months.map(m => `<tr><td>${m}</td><td style="text-align:right;">${monthlyData[m].hours.toFixed(1)}</td><td style="text-align:right;">${formatCurrency(monthlyData[m].cost)}</td><td style="text-align:right;">${monthlyData[m].entries}</td></tr>`).join('')}
+            ${months.map(m => '<tr><td>' + m + '</td><td style="text-align:right;">' + monthlyData[m].hours.toFixed(1) + '</td><td style="text-align:right;">' + formatCurrency(monthlyData[m].cost) + '</td><td style="text-align:right;">' + monthlyData[m].entries + '</td></tr>').join('')}
           </tbody>
-        </table>
+        </table>`}
       </div>
       <div class="card">
         <div class="card-title"><div class="accent-bar"></div>Job Breakdown</div>
+        ${Object.keys(jobData).length === 0 ? '<p class="intro-text">No timesheet entries yet.</p>' : `
         <table style="width:100%;font-size:13px;">
           <thead><tr><th style="text-align:left;">Job</th><th style="text-align:right;">Hours</th><th style="text-align:right;">Cost</th></tr></thead>
           <tbody>
             ${Object.entries(jobData).sort((a, b) => b[1].hours - a[1].hours).map(([jid, d]) => {
               const job = jid !== 'unassigned' ? jobs.find(j => j.id === jid) : null;
-              return `<tr><td>${job ? escapeHtml(job.jobNumber + ' \u2014 ' + job.name) : 'Unassigned'}</td><td style="text-align:right;">${d.hours.toFixed(1)}</td><td style="text-align:right;">${formatCurrency(d.cost)}</td></tr>`;
+              return '<tr><td>' + (job ? escapeHtml(job.jobNumber + ' \u2014 ' + job.name) : 'Unassigned') + '</td><td style="text-align:right;">' + d.hours.toFixed(1) + '</td><td style="text-align:right;">' + formatCurrency(d.cost) + '</td></tr>';
             }).join('')}
           </tbody>
-        </table>
+        </table>`}
       </div>
     </div>
 
+    ${timesheets.length > 0 ? `
     <div class="card">
       <div class="card-title"><div class="accent-bar"></div>Recent Entries</div>
       ${timesheets.sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 20).map(t => {
         const job = jobs.find(j => j.id === t.jobId);
-        const hrs = (t.hoursRegular || 0) + (t.hoursOvertime || 0) + (t.hoursTravel || 0);
-        return `<div class="doc-row" onclick="editTimesheet('${t.id}')">
-          <div class="doc-row-info">
-            <div class="doc-row-number">${formatDateShort(t.date)}</div>
-            <div class="doc-row-meta">${job ? escapeHtml(job.jobNumber) : 'No job'} \u00b7 ${escapeHtml(t.description || '')} \u00b7 ${hrs.toFixed(1)}h</div>
-          </div>
-          <div class="doc-row-actions"><span class="doc-row-total">${formatCurrency(t.totalCost)}</span></div>
-        </div>`;
+        const hrs = getTimesheetTotalHours(t);
+        return '<div class="doc-row" onclick="editTimesheet(\'' + t.id + '\')"><div class="doc-row-info"><div class="doc-row-number">' + formatDateShort(t.date) + '</div><div class="doc-row-meta">' + (job ? escapeHtml(job.jobNumber) : 'No job') + ' \u00b7 ' + escapeHtml(t.description || '') + ' \u00b7 ' + hrs.toFixed(1) + 'h</div></div><div class="doc-row-actions"><span class="doc-row-total">' + formatCurrency(t.totalCost) + '</span></div></div>';
       }).join('')}
-    </div>
+    </div>` : ''}
   `;
 }
 
@@ -15278,11 +16779,13 @@ function exportJobPackagePDF(jobId) {
     return [parseInt(hex.substring(0,2),16), parseInt(hex.substring(2,4),16), parseInt(hex.substring(4,6),16)];
   }
 
+  doc.setFillColor(...hexToRgb(theme.colors.bg));
+  doc.rect(0, 0, pageWidth, pageHeight, 'F');
   let y = pdfAddHeader(doc, theme, company, 'JOB PACKAGE', job.jobNumber + ' \u2014 ' + (job.name || ''), pageWidth);
   y += 5;
 
   // Job Info
-  doc.setFontSize(9); doc.setTextColor(80);
+  doc.setFontSize(9); doc.setTextColor(...hexToRgb(theme.colors.textSecondary));
   doc.text('Customer: ' + (job.customer?.name || '') + ' \u2014 ' + (job.customer?.company || ''), ml, y); y += 4;
   doc.text('Status: ' + (job.status || ''), ml, y); y += 4;
   doc.text('Start: ' + (job.startDate || 'N/A') + '  |  End: ' + (job.endDate || 'N/A'), ml, y); y += 8;
@@ -15296,7 +16799,9 @@ function exportJobPackagePDF(jobId) {
       startY: y, margin: { left: ml, right: mr },
       head: [['#', 'Description', 'Total Cost', 'Customer Price']],
       body: estimates.map(e => [e.estimateNumber || '', e.projectName || '', formatCurrency(e.totalCost || 0), formatCurrency(e.totalCustomerPrice || 0)]),
-      styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: hexToRgbLocal(theme.colors.accent), textColor: [255,255,255] },
+      styles: { fontSize: 8, cellPadding: 2, textColor: hexToRgb(theme.colors.text) }, headStyles: { fillColor: hexToRgb(theme.colors.accent), textColor: isLightColor(theme.colors.accent) ? [30,30,30] : [255,255,255] },
+      bodyStyles: { fillColor: hexToRgb(theme.colors.tableBg) }, alternateRowStyles: { fillColor: hexToRgb(theme.colors.tableAlt) },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   }
@@ -15311,7 +16816,9 @@ function exportJobPackagePDF(jobId) {
       startY: y, margin: { left: ml, right: mr },
       head: [['#', 'Customer', 'Date', 'Status', 'Total']],
       body: quotes.map(q => [q.docNumber || '', q.customerName || '', q.date || '', q.status || 'draft', formatCurrency(q.total || 0)]),
-      styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: hexToRgbLocal(theme.colors.accent), textColor: [255,255,255] },
+      styles: { fontSize: 8, cellPadding: 2, textColor: hexToRgb(theme.colors.text) }, headStyles: { fillColor: hexToRgb(theme.colors.accent), textColor: isLightColor(theme.colors.accent) ? [30,30,30] : [255,255,255] },
+      bodyStyles: { fillColor: hexToRgb(theme.colors.tableBg) }, alternateRowStyles: { fillColor: hexToRgb(theme.colors.tableAlt) },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   }
@@ -15326,7 +16833,9 @@ function exportJobPackagePDF(jobId) {
       startY: y, margin: { left: ml, right: mr },
       head: [['#', 'Customer', 'Date', 'Status', 'Total']],
       body: invoices.map(inv => [inv.docNumber || '', inv.customerName || '', inv.date || '', inv.status || 'draft', formatCurrency(inv.total || 0)]),
-      styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: hexToRgbLocal(theme.colors.accent), textColor: [255,255,255] },
+      styles: { fontSize: 8, cellPadding: 2, textColor: hexToRgb(theme.colors.text) }, headStyles: { fillColor: hexToRgb(theme.colors.accent), textColor: isLightColor(theme.colors.accent) ? [30,30,30] : [255,255,255] },
+      bodyStyles: { fillColor: hexToRgb(theme.colors.tableBg) }, alternateRowStyles: { fillColor: hexToRgb(theme.colors.tableAlt) },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   }
@@ -15337,15 +16846,28 @@ function exportJobPackagePDF(jobId) {
     if (y > pageHeight - 50) { doc.addPage(); y = 20; }
     doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...hexToRgbLocal(theme.colors.accent));
     doc.text('TIMESHEETS (' + timesheets.length + ')', ml, y); y += 6;
-    const totalHrs = timesheets.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
+    const totalHrs = timesheets.reduce((s, t) => s + getTimesheetTotalHours(t), 0);
     const totalCost = timesheets.reduce((s, t) => s + (t.totalCost || 0), 0);
+    // Build rows from new multi-row format
+    const pdfTsRows = [];
+    timesheets.forEach(t => {
+      if (t.rows && t.rows.length > 0) {
+        t.rows.forEach(r => {
+          pdfTsRows.push([r.technicianName || '', t.date || '', r.hourType || '', (r.hours||0).toFixed(1), r.description || '']);
+        });
+      } else {
+        pdfTsRows.push([t.employeeName || '', t.date || '', 'mixed', getTimesheetTotalHours(t).toFixed(1), t.description || '']);
+      }
+    });
     doc.autoTable({
       startY: y, margin: { left: ml, right: mr },
-      head: [['Employee', 'Date', 'Reg Hrs', 'OT Hrs', 'Travel', 'Cost']],
-      body: timesheets.map(t => [t.employeeName || '', t.date || '', (t.hoursRegular||0).toFixed(1), (t.hoursOvertime||0).toFixed(1), (t.hoursTravel||0).toFixed(1), formatCurrency(t.totalCost||0)]),
-      foot: [['Total', '', '', '', '', formatCurrency(totalCost)]],
-      styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: hexToRgbLocal(theme.colors.accent), textColor: [255,255,255] },
-      footStyles: { fillColor: [240,240,240], fontStyle: 'bold' },
+      head: [['Technician', 'Date', 'Hour Type', 'Hours', 'Description']],
+      body: pdfTsRows,
+      foot: [['Total', '', '', totalHrs.toFixed(1) + ' hrs', '']],
+      styles: { fontSize: 8, cellPadding: 2, textColor: hexToRgb(theme.colors.text) }, headStyles: { fillColor: hexToRgb(theme.colors.accent), textColor: isLightColor(theme.colors.accent) ? [30,30,30] : [255,255,255] },
+      bodyStyles: { fillColor: hexToRgb(theme.colors.tableBg) }, alternateRowStyles: { fillColor: hexToRgb(theme.colors.tableAlt) },
+      footStyles: { fillColor: hexToRgb(theme.colors.tableAlt), fontStyle: 'bold', textColor: hexToRgb(theme.colors.text) },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   }
@@ -15360,7 +16882,9 @@ function exportJobPackagePDF(jobId) {
       startY: y, margin: { left: ml, right: mr },
       head: [['Vendor', 'Date', 'Description', 'Amount']],
       body: receipts.map(r => [r.vendor || '', r.date || '', r.description || '', formatCurrency(r.amount || 0)]),
-      styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: hexToRgbLocal(theme.colors.accent), textColor: [255,255,255] },
+      styles: { fontSize: 8, cellPadding: 2, textColor: hexToRgb(theme.colors.text) }, headStyles: { fillColor: hexToRgb(theme.colors.accent), textColor: isLightColor(theme.colors.accent) ? [30,30,30] : [255,255,255] },
+      bodyStyles: { fillColor: hexToRgb(theme.colors.tableBg) }, alternateRowStyles: { fillColor: hexToRgb(theme.colors.tableAlt) },
+      didDrawPage: pdfAutoTablePageHook(theme),
     });
     y = doc.lastAutoTable.finalY + 8;
   }
@@ -15369,7 +16893,7 @@ function exportJobPackagePDF(jobId) {
   const totalPages = doc.internal.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
-    doc.setFontSize(7); doc.setTextColor(120);
+    doc.setFontSize(7); doc.setTextColor(...hexToRgb(theme.colors.textSecondary));
     doc.text(company.name + ' | ' + job.jobNumber + ' \u2014 Job Package', ml, pageHeight - 8);
     doc.text('Page ' + i + ' of ' + totalPages, pageWidth - mr, pageHeight - 8, { align: 'right' });
   }
@@ -15384,19 +16908,38 @@ function exportJobPackagePDF(jobId) {
 function getEmployeeKPIs() {
   const timesheets = getTimesheets();
   const empTypes = getEmployeeTypes();
-  const employeeNames = [...new Set(timesheets.map(t => t.employeeName).filter(Boolean))];
+  // Gather all employee/technician names from both old and new formats
+  const nameSet = new Set();
+  timesheets.forEach(t => {
+    if (t.employeeName) nameSet.add(t.employeeName);
+    if (t.rows) t.rows.forEach(r => { if (r.technicianName) nameSet.add(r.technicianName); });
+  });
+  const employeeNames = [...nameSet];
 
   return employeeNames.map(name => {
-    const entries = timesheets.filter(t => t.employeeName === name);
-    const totalHours = entries.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
-    const totalTravel = entries.reduce((s, t) => s + (t.hoursTravel || 0), 0);
-    const totalCost = entries.reduce((s, t) => s + (t.totalCost || 0), 0);
-    const billableHours = entries.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0), 0);
-    const totalAvailable = entries.reduce((s, t) => s + (t.hoursRegular || 0) + (t.hoursOvertime || 0) + (t.hoursTravel || 0), 0);
+    let totalHours = 0, totalTravel = 0, totalCost = 0, entryCount = 0;
+    timesheets.forEach(t => {
+      if (t.rows && t.rows.length > 0) {
+        // New multi-row format: count only rows for this technician
+        t.rows.forEach(r => {
+          if (r.technicianName === name) {
+            totalHours += (r.hours || 0);
+            if (r.hourType === 'travel') totalTravel += (r.hours || 0);
+            entryCount++;
+          }
+        });
+      } else if (t.employeeName === name) {
+        // Legacy format
+        totalHours += (t.hoursRegular || 0) + (t.hoursOvertime || 0);
+        totalTravel += (t.hoursTravel || 0);
+        totalCost += (t.totalCost || 0);
+        entryCount++;
+      }
+    });
+    const billableHours = totalHours - totalTravel;
+    const totalAvailable = totalHours + totalTravel;
     const utilization = totalAvailable > 0 ? (billableHours / totalAvailable * 100) : 0;
-    const empType = entries.find(e => e.employeeType)?.employeeType || '';
-    const empTypeInfo = empType ? empTypes.find(t => t.id === empType) : null;
-    return { name, totalHours, totalTravel, totalCost, utilization, entryCount: entries.length, empTypeInfo };
+    return { name, totalHours, totalTravel, totalCost, utilization, entryCount, empTypeInfo: null };
   }).sort((a, b) => b.totalHours - a.totalHours);
 }
 
