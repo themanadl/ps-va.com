@@ -1359,9 +1359,10 @@ function renderEstimateEditor(est) {
     </div>
     <div class="totals-section">
       <div class="totals-table">
-        <div class="totals-row"><span class="label">Total Internal Cost:</span><span class="value" id="est-totalCost">$0.00</span></div>
-        <div class="totals-row"><span class="label">Total Customer Price:</span><span class="value" id="est-totalPrice">$0.00</span></div>
-        <div class="totals-row total"><span class="label">Estimated Profit:</span><span class="value" id="est-profit" style="color:var(--success);">$0.00</span></div>
+        <div class="totals-row"><span class="label">Total Billed (Ext. Cost):</span><span class="value" id="est-totalCost">$0.00</span></div>
+        <div class="totals-row"><span class="label">Total Customer Price (w/ Markup):</span><span class="value" id="est-totalPrice">$0.00</span></div>
+        <div class="totals-row" style="display:none;"><span class="label">Actual Company Cost (Labor Pay Rates):</span><span class="value" id="est-actualCost" style="color:var(--text-secondary);">$0.00</span></div>
+        <div class="totals-row total"><span class="label" id="est-profit-label">Estimated Profit (Markup Only):</span><span class="value" id="est-profit" style="color:var(--success);">$0.00</span></div>
       </div>
     </div>
     <div class="card" style="margin-top:20px;">
@@ -1378,9 +1379,66 @@ function renderEstimateEditor(est) {
 function renderEstLineItems() {
   const tbody = document.getElementById('est-line-items');
   if (!tbody) return;
-  tbody.innerHTML = window._estLineItems.map((li, idx) => `
+  const rs = getRateSheet();
+  const laborRates = rs.laborRates || [];
+  const rosterNames = getEmployeeRosterNames();
+  tbody.innerHTML = window._estLineItems.map((li, idx) => {
+    const isLabor = li.category === 'labor';
+    if (isLabor && !li.assignedTechnicians) li.assignedTechnicians = [];
+    const techs = li.assignedTechnicians || [];
+    const techRows = isLabor ? techs.map((t, ti) => {
+      const emp = getEmployeeById(t.employeeId);
+      const currentPayRate = emp ? emp.payRate : t.payRate;
+      if (emp) t.payRate = currentPayRate; // keep in sync
+      t.name = emp ? emp.name : t.name;
+      return `<tr style="background:var(--card-bg);">
+        <td style="padding:4px 6px;"><select class="form-select" style="font-size:12px;padding:3px 6px;" onchange="updateEstTech(${idx},${ti},'employeeId',this.value)">
+          <option value="">— Select Technician —</option>
+          ${rosterNames.map(e => `<option value="${e.id}" ${t.employeeId === e.id ? 'selected' : ''}>${escapeHtml(e.name)}${e.employeeType ? ' (' + escapeHtml(e.employeeType) + ')' : ''}</option>`).join('')}
+        </select></td>
+        <td style="padding:4px 6px;"><select class="form-select" style="font-size:12px;padding:3px 6px;" onchange="updateEstTech(${idx},${ti},'hourType',this.value)">
+          ${laborRates.filter(r => !r.hidden && r.rate > 0).map(r => `<option value="${r.id}" ${t.hourType === r.id ? 'selected' : ''}>${escapeHtml(r.name)} (${r.multiplier}x)</option>`).join('')}
+        </select></td>
+        <td style="padding:4px 6px;"><input class="form-input" style="font-size:12px;padding:3px 6px;width:70px;" type="number" value="${t.hours}" min="0" step="0.5" onchange="updateEstTech(${idx},${ti},'hours',parseFloat(this.value)||0)"></td>
+        <td style="padding:4px 6px;font-size:12px;color:var(--text-secondary);">${formatCurrency(currentPayRate)}/hr</td>
+        <td style="padding:4px 6px;font-size:12px;font-weight:600;color:var(--text-secondary);" id="est-tech-cost-${idx}-${ti}">${formatCurrency(getEmployeeEffectivePayRate(currentPayRate, t.hourType) * t.hours)}</td>
+        <td style="padding:4px 2px;"><button class="delete-btn" style="font-size:11px;" onclick="removeEstTech(${idx},${ti})" title="Remove">✕</button></td>
+      </tr>`;
+    }).join('') : '';
+
+    const techPanel = isLabor ? `
+    <tr id="est-tech-panel-${idx}" style="${techs.length > 0 || li._showTechPanel ? '' : 'display:none;'}">
+      <td colspan="9" style="padding:0;">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;margin:4px 8px 8px;padding:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-size:12px;font-weight:600;color:var(--text-secondary);">👷 Assigned Technicians — Actual Company Cost</span>
+            <button class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="addEstTech(${idx})">+ Add Technician</button>
+          </div>
+          ${techs.length > 0 ? `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr style="color:var(--text-secondary);font-size:11px;text-transform:uppercase;">
+              <th style="text-align:left;padding:2px 6px;">Technician</th>
+              <th style="text-align:left;padding:2px 6px;">Hour Type</th>
+              <th style="text-align:left;padding:2px 6px;">Hours</th>
+              <th style="text-align:left;padding:2px 6px;">Base Pay</th>
+              <th style="text-align:left;padding:2px 6px;">Eff. Cost</th>
+              <th></th>
+            </tr></thead>
+            <tbody>${techRows}</tbody>
+            <tfoot><tr style="border-top:1px solid var(--border);font-weight:600;font-size:12px;">
+              <td colspan="2" style="padding:4px 6px;">Total Actual Cost:</td>
+              <td style="padding:4px 6px;" id="est-tech-total-hrs-${idx}">0</td>
+              <td></td>
+              <td style="padding:4px 6px;color:var(--accent);" id="est-tech-total-cost-${idx}">$0.00</td>
+              <td></td>
+            </tr></tfoot>
+          </table>` : '<p style="font-size:12px;color:var(--text-secondary);margin:4px 0;">No technicians assigned. Click "+ Add Technician" to calculate actual labor cost.</p>'}
+        </div>
+      </td>
+    </tr>` : '';
+
+    return `
     <tr>
-      <td><select class="form-select" onchange="window._estLineItems[${idx}].category=this.value; recalcEstimate();">
+      <td><select class="form-select" onchange="window._estLineItems[${idx}].category=this.value; renderEstLineItems(); recalcEstimate();">
         ${COST_CATEGORIES.map(c => `<option value="${c.id}" ${li.category === c.id ? 'selected' : ''}>${c.label}</option>`).join('')}
       </select></td>
       <td><input class="form-input" value="${escapeHtml(li.description)}" onchange="window._estLineItems[${idx}].description=this.value;"></td>
@@ -1398,9 +1456,62 @@ function renderEstLineItems() {
       <td><input class="form-input" type="number" value="${li.markupPercent}" min="0" step="1" onchange="window._estLineItems[${idx}].markupPercent=parseFloat(this.value)||0; recalcEstimate();"></td>
       <td style="text-align:right;font-weight:600;" id="est-ext-${idx}">$0.00</td>
       <td style="text-align:right;font-weight:600;color:var(--accent);" id="est-cust-${idx}">$0.00</td>
-      <td><button class="delete-btn" onclick="removeEstLineItem(${idx})" title="Remove">✕</button></td>
+      <td style="display:flex;gap:4px;align-items:center;">
+        ${isLabor ? `<button class="btn-icon" style="font-size:12px;padding:2px 4px;" onclick="toggleEstTechPanel(${idx})" title="Assign Technicians">👷</button>` : ''}
+        <button class="delete-btn" onclick="removeEstLineItem(${idx})" title="Remove">✕</button>
+      </td>
     </tr>
-  `).join('');
+    ${techPanel}`;
+  }).join('');
+  recalcEstimate();
+}
+
+function toggleEstTechPanel(idx) {
+  const li = window._estLineItems[idx];
+  if (!li) return;
+  const panel = document.getElementById('est-tech-panel-' + idx);
+  if (panel) {
+    const isHidden = panel.style.display === 'none';
+    panel.style.display = isHidden ? '' : 'none';
+    li._showTechPanel = isHidden;
+  }
+}
+
+function addEstTech(lineIdx) {
+  const li = window._estLineItems[lineIdx];
+  if (!li || !li.assignedTechnicians) return;
+  li.assignedTechnicians.push({ employeeId: '', name: '', hours: 0, payRate: 0, hourType: 'straight' });
+  li._showTechPanel = true;
+  renderEstLineItems();
+}
+
+function removeEstTech(lineIdx, techIdx) {
+  const li = window._estLineItems[lineIdx];
+  if (!li || !li.assignedTechnicians) return;
+  li.assignedTechnicians.splice(techIdx, 1);
+  renderEstLineItems();
+}
+
+function updateEstTech(lineIdx, techIdx, field, value) {
+  const li = window._estLineItems[lineIdx];
+  if (!li || !li.assignedTechnicians) return;
+  const t = li.assignedTechnicians[techIdx];
+  if (!t) return;
+  if (field === 'employeeId') {
+    t.employeeId = value;
+    const emp = getEmployeeById(value);
+    if (emp) {
+      t.name = emp.name;
+      t.payRate = emp.payRate || 0;
+    }
+    renderEstLineItems();
+  } else if (field === 'hours') {
+    t.hours = value;
+    recalcEstimate();
+  } else if (field === 'hourType') {
+    t.hourType = value;
+    recalcEstimate();
+  }
 }
 
 function addEstLineItemFromRate() {
@@ -1509,40 +1620,96 @@ function removeEstLineItem(idx) {
 }
 
 function recalcEstimate() {
-  let totalCost = 0, totalPrice = 0;
+  let totalBilled = 0, totalActualCost = 0;
+  let hasAnyTechs = false;
   window._estLineItems.forEach((li, idx) => {
     const ext = (li.quantity || 0) * (li.unitCost || 0);
     const cust = ext * (1 + (li.markupPercent || 0) / 100);
     li.extendedCost = ext;
     li.customerPrice = cust;
-    totalCost += ext;
-    totalPrice += cust;
+    totalBilled += cust;
+
+    // For labor lines with assigned technicians, compute actual cost from pay rates
+    const isLabor = li.category === 'labor';
+    const techs = (isLabor && li.assignedTechnicians) ? li.assignedTechnicians : [];
+    if (isLabor && techs.length > 0) {
+      hasAnyTechs = true;
+      let lineTechCost = 0;
+      let lineTechHrs = 0;
+      techs.forEach((t, ti) => {
+        const effRate = getEmployeeEffectivePayRate(t.payRate || 0, t.hourType);
+        const techCost = effRate * (t.hours || 0);
+        lineTechCost += techCost;
+        lineTechHrs += (t.hours || 0);
+        const costEl = document.getElementById('est-tech-cost-' + idx + '-' + ti);
+        if (costEl) costEl.textContent = formatCurrency(techCost);
+      });
+      li.actualLaborCost = lineTechCost;
+      totalActualCost += lineTechCost;
+      const totalHrsEl = document.getElementById('est-tech-total-hrs-' + idx);
+      const totalCostEl = document.getElementById('est-tech-total-cost-' + idx);
+      if (totalHrsEl) totalHrsEl.textContent = lineTechHrs.toFixed(1);
+      if (totalCostEl) totalCostEl.textContent = formatCurrency(lineTechCost);
+    } else {
+      // Non-labor items or labor without techs: actual cost = extended cost
+      li.actualLaborCost = isLabor ? ext : 0;
+      totalActualCost += ext;
+    }
+
     const extEl = document.getElementById('est-ext-' + idx);
     const custEl = document.getElementById('est-cust-' + idx);
     if (extEl) extEl.textContent = formatCurrency(ext);
     if (custEl) custEl.textContent = formatCurrency(cust);
   });
-  const profit = totalPrice - totalCost;
-  document.getElementById('est-totalCost').textContent = formatCurrency(totalCost);
-  document.getElementById('est-totalPrice').textContent = formatCurrency(totalPrice);
+  const profit = totalBilled - totalActualCost;
+  const billedEl = document.getElementById('est-totalPrice');
+  const costEl = document.getElementById('est-totalCost');
+  const actualCostEl = document.getElementById('est-actualCost');
   const profitEl = document.getElementById('est-profit');
-  profitEl.textContent = formatCurrency(profit);
-  profitEl.style.color = profit >= 0 ? 'var(--success)' : 'var(--accent)';
+  if (costEl) costEl.textContent = formatCurrency(window._estLineItems.reduce((s, li) => s + (li.extendedCost || 0), 0));
+  if (billedEl) billedEl.textContent = formatCurrency(totalBilled);
+  if (actualCostEl) {
+    actualCostEl.textContent = formatCurrency(totalActualCost);
+    actualCostEl.parentElement.style.display = hasAnyTechs ? '' : 'none';
+  }
+  if (profitEl) {
+    profitEl.textContent = formatCurrency(profit);
+    profitEl.style.color = profit >= 0 ? 'var(--success)' : 'var(--accent)';
+  }
+  // Update profit label to clarify what's being calculated
+  const profitLabel = document.getElementById('est-profit-label');
+  if (profitLabel) profitLabel.textContent = hasAnyTechs ? 'True Profit (Billed − Actual Cost):' : 'Estimated Profit (Markup Only):';
 }
 
 function collectEstimateData() {
   const est = window._currentEstimate;
   est.estimateNumber = document.getElementById('est-number').value;
   est.date = document.getElementById('est-date').value;
-  est.lineItems = window._estLineItems;
+  est.lineItems = window._estLineItems.map(li => {
+    const clean = {...li};
+    delete clean._showTechPanel; // don't persist UI state
+    return clean;
+  });
   est.notes = document.getElementById('est-notes').value;
   // Resolve job selector (may auto-create a job)
   est.jobId = resolveJobId('est-job', 'Estimate', est);
-  let tc = 0, tp = 0;
-  est.lineItems.forEach(li => { tc += li.extendedCost || 0; tp += li.customerPrice || 0; });
-  est.totalCost = tc;
-  est.totalCustomerPrice = tp;
-  est.estimatedProfit = tp - tc;
+  let totalBilled = 0, totalActualCost = 0;
+  est.lineItems.forEach(li => {
+    totalBilled += li.customerPrice || 0;
+    if (li.category === 'labor' && li.assignedTechnicians && li.assignedTechnicians.length > 0) {
+      let lineCost = 0;
+      li.assignedTechnicians.forEach(t => {
+        lineCost += getEmployeeEffectivePayRate(t.payRate || 0, t.hourType) * (t.hours || 0);
+      });
+      totalActualCost += lineCost;
+    } else {
+      totalActualCost += li.extendedCost || 0;
+    }
+  });
+  est.totalCost = est.lineItems.reduce((s, li) => s + (li.extendedCost || 0), 0);
+  est.totalCustomerPrice = totalBilled;
+  est.totalActualCost = totalActualCost;
+  est.estimatedProfit = totalBilled - totalActualCost;
   return est;
 }
 
@@ -7785,14 +7952,63 @@ async function exportEstimatePDF() {
   });
 
   y = doc.lastAutoTable.finalY + 6;
+
+  // --- Assigned Technicians section (if any labor lines have techs) ---
+  const laborWithTechs = (est.lineItems || []).filter(li => li.category === 'labor' && li.assignedTechnicians && li.assignedTechnicians.length > 0);
+  if (laborWithTechs.length > 0) {
+    if (y > 230) { doc.addPage(); pdfAutoTablePageHook(theme)({doc, pageNumber: doc.getNumberOfPages(), settings: {}}); y = 20; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+    doc.setTextColor(...hexToRgb(colors.accent));
+    doc.text('Assigned Technicians — Actual Company Cost', 15, y); y += 4;
+    const techHead = [['Labor Line', 'Technician', 'Hour Type', 'Hours', 'Base Pay', 'Eff. Rate', 'Cost']];
+    const techBody = [];
+    let grandTotalCost = 0, grandTotalHrs = 0;
+    laborWithTechs.forEach(li => {
+      li.assignedTechnicians.forEach(t => {
+        const effRate = getEmployeeEffectivePayRate(t.payRate || 0, t.hourType);
+        const cost = effRate * (t.hours || 0);
+        grandTotalCost += cost;
+        grandTotalHrs += (t.hours || 0);
+        const rs = getRateSheet();
+        const hourTypeName = (rs.laborRates || []).find(r => r.id === t.hourType)?.name || t.hourType || 'Straight';
+        techBody.push([
+          li.description.substring(0, 25),
+          t.name || 'Unassigned',
+          hourTypeName,
+          String(t.hours || 0),
+          formatCurrency(t.payRate || 0) + '/hr',
+          formatCurrency(effRate) + '/hr',
+          formatCurrency(cost)
+        ]);
+      });
+    });
+    techBody.push([{ content: 'TOTAL', colSpan: 3, styles: { fontStyle: 'bold' } }, String(grandTotalHrs.toFixed(1)), '', '', { content: formatCurrency(grandTotalCost), styles: { fontStyle: 'bold' } }]);
+    doc.autoTable({
+      startY: y, head: techHead, body: techBody,
+      margin: { left: 15, right: 15 },
+      styles: { fontSize: 7, cellPadding: 1.5, textColor: hexToRgb(colors.text), lineColor: hexToRgb(colors.border), lineWidth: 0.2 },
+      headStyles: { fillColor: hexToRgb(colors.tableAlt), textColor: hexToRgb(colors.accent), fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: hexToRgb(colors.tableAlt) },
+      bodyStyles: { fillColor: hexToRgb(colors.tableBg) },
+      columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } },
+      didDrawPage: pdfAutoTablePageHook(theme),
+    });
+    y = doc.lastAutoTable.finalY + 6;
+  }
+
+  // --- Totals ---
   doc.setDrawColor(...hexToRgb(colors.accent)); doc.setLineWidth(0.4);
-  doc.line(pageWidth - 80, y, pageWidth - 15, y); y += 5;
+  doc.line(pageWidth - 95, y, pageWidth - 15, y); y += 5;
   doc.setFontSize(9); doc.setTextColor(...hexToRgb(colors.text));
-  doc.text('Total Cost:', pageWidth - 80, y); doc.text(formatCurrency(est.totalCost), pageWidth - 15, y, { align: 'right' }); y += 5;
-  doc.text('Customer Price:', pageWidth - 80, y); doc.text(formatCurrency(est.totalCustomerPrice), pageWidth - 15, y, { align: 'right' }); y += 5;
+  doc.text('Total Ext. Cost:', pageWidth - 95, y); doc.text(formatCurrency(est.totalCost), pageWidth - 15, y, { align: 'right' }); y += 5;
+  doc.text('Customer Price (w/ Markup):', pageWidth - 95, y); doc.text(formatCurrency(est.totalCustomerPrice), pageWidth - 15, y, { align: 'right' }); y += 5;
+  if (est.totalActualCost !== undefined && laborWithTechs.length > 0) {
+    doc.text('Actual Company Cost:', pageWidth - 95, y); doc.text(formatCurrency(est.totalActualCost), pageWidth - 15, y, { align: 'right' }); y += 5;
+  }
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-  doc.setTextColor(...hexToRgb(colors.accent));
-  doc.text('Est. Profit:', pageWidth - 80, y + 2); doc.text(formatCurrency(est.estimatedProfit), pageWidth - 15, y + 2, { align: 'right' });
+  const hasActualCost = est.totalActualCost !== undefined && laborWithTechs.length > 0;
+  doc.setTextColor(...hexToRgb((est.estimatedProfit || 0) >= 0 ? (pdfDarkMode ? '#22C55E' : '#16A34A') : (pdfDarkMode ? '#EF4444' : '#DC2626')));
+  doc.text(hasActualCost ? 'True Profit:' : 'Est. Profit:', pageWidth - 95, y + 2); doc.text(formatCurrency(est.estimatedProfit), pageWidth - 15, y + 2, { align: 'right' });
 
   // Thin accent line at bottom
    pdfDrawFooter(doc, theme, company);
